@@ -73,5 +73,7 @@ The first time, right-click `DigiWallet.app` and choose **Open**.
    ```
 
 | `make all` | Builds the program |
+
 | `make run` | Builds and starts it in one step |
+
 | `make clean` | Deletes everything the build created |
