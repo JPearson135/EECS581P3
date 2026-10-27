@@ -1,0 +1,10 @@
+obj/
+DigiWallet
+DigiWallet.exe
+DigiWallet_debug
+DigiWallet_debug.exe
+DigiWallet.app/
+data/
+*.enc
+*.o
+*.d
