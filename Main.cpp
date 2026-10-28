@@ -1,9 +1,11 @@
 #include <iostream>
 
 #include "Ui.hpp"
+#include "MasterPassword.hpp"
 
 int main() {
     ui::init();
+    if (!security::completeFirstRun()) return 0;
 
     ui::Menu root("DigiWallet", "Exit");
     root.setWelcome(

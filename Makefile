@@ -3,6 +3,13 @@ CXXFLAGS ?= -std=c++17 -Wall -Wextra -O2
 DEBUGFLAGS = -std=c++17 -Wall -Wextra -g -O0 -fsanitize=address,undefined
 
 FLTK_CONFIG ?= fltk-config
+OPENSSL_PREFIX ?= $(shell brew --prefix openssl@3 2>/dev/null)
+ifneq ($(OPENSSL_PREFIX),)
+  CPPFLAGS += -I$(OPENSSL_PREFIX)/include
+  LDFLAGS += -L$(OPENSSL_PREFIX)/lib
+endif
+LDLIBS += -lcrypto
+
 APP_NAME  = DigiWallet
 BUILD_DIR = obj
 
@@ -44,10 +51,10 @@ all: build
 build: $(TARGET)
 
 $(TARGET): $(OBJS)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(FLTK_LDFLAGS)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ $^ $(FLTK_LDFLAGS) $(LDFLAGS) $(LDLIBS)
 
 $(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(FLTK_CXXFLAGS) -MMD -MP -c $< -o $@
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(FLTK_CXXFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -79,14 +86,14 @@ app:
 endif
 
 debug:
-	$(CXX) $(DEBUGFLAGS) $(FLTK_CXXFLAGS) -o $(DEBUG_TARGET) $(SRCS) $(FLTK_LDFLAGS)
+	$(CXX) $(CPPFLAGS) $(DEBUGFLAGS) $(FLTK_CXXFLAGS) -o $(DEBUG_TARGET) $(SRCS) $(FLTK_LDFLAGS) $(LDFLAGS) $(LDLIBS)
 
 ifneq ($(wildcard Tests/test_main.cpp),)
 test: $(BUILD_DIR)/test_runner$(EXE)
 	./$(BUILD_DIR)/test_runner$(EXE)
 
 $(BUILD_DIR)/test_runner$(EXE): Tests/test_main.cpp $(LIB_OBJS) | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(FLTK_CXXFLAGS) -o $@ Tests/test_main.cpp $(LIB_OBJS) $(FLTK_LDFLAGS)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(FLTK_CXXFLAGS) -o $@ Tests/test_main.cpp $(LIB_OBJS) $(FLTK_LDFLAGS) $(LDFLAGS) $(LDLIBS)
 else
 test:
 	@echo "No tests yet: add Tests/test_main.cpp to enable 'make test'."
