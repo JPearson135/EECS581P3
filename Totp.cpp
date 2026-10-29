@@ -1,0 +1,1 @@
+// Totp.cpp - Implementation for Totp.hpp: Authenticator feature.

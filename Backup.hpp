@@ -1,0 +1,1 @@
+// Backup.hpp - Backup Service. Creates an encrypted backup of the vault and restores one after checking it is genuine.

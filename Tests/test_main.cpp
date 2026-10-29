@@ -1,4 +1,4 @@
-#include "../MasterPassword.hpp"
+#include "../Vault.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -38,7 +38,21 @@ int main() {
         require((std::filesystem::status(first).permissions() &
             (std::filesystem::perms::group_all | std::filesystem::perms::others_all)) ==
             std::filesystem::perms::none);
+        // Unlocking: the right password verifies, anything else does not.
+        require(security::verifyMasterPassword(first, password));
+        require(!security::verifyMasterPassword(first, "Test-master-password-124"));
+        require(!security::verifyMasterPassword(first, ""));
+        require(!security::verifyMasterPassword(first, std::string(2000, 'a')));
+        // A damaged or missing record is an error, never a successful unlock.
+        const auto broken = dir / "broken";
+        { std::ofstream out(broken); out << "DigiWallet-master-v1\nPBKDF2-HMAC-SHA256\n600000\nzz\nzz\n"; }
+        rejected = false;
+        try { security::verifyMasterPassword(broken, password); } catch (...) { rejected = true; }
+        require(rejected);
+        rejected = false;
+        try { security::verifyMasterPassword(dir / "missing", password); } catch (...) { rejected = true; }
+        require(rejected);
         std::filesystem::remove_all(dir);
-        std::cout << "Master password setup tests passed\n";
+        std::cout << "Master password setup and unlock tests passed\n";
     } catch (...) { std::filesystem::remove_all(dir); throw; }
 }

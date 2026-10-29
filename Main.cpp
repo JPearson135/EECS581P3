@@ -1,11 +1,10 @@
 #include <iostream>
-
 #include "Ui.hpp"
-#include "MasterPassword.hpp"
+#include "Vault.hpp"
 
 int main() {
     ui::init();
-    if (!security::completeFirstRun()) return 0;
+    if (!security::unlockVault()) return 0;
 
     ui::Menu root("DigiWallet", "Exit");
     root.setWelcome(

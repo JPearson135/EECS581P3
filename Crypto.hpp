@@ -1,0 +1,1 @@
+// Crypto.hpp - Crypto Service. Authenticated encryption and decryption of data (fresh random nonce per save, fails on tampering) and secure random bytes.

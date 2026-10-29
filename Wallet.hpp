@@ -1,0 +1,1 @@
+// Wallet.hpp - Bank Card Wallet feature. Stores card details encrypted and shows them masked by default.

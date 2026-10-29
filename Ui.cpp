@@ -1,11 +1,16 @@
+// Ui.cpp - FLTK front end. Dark, minimal look: near-black background, hairline
+// dividers, light text, one gold accent, uppercase spaced labels.
 #include "Ui.hpp"
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Button.H>
 #include <FL/Fl_Double_Window.H>
+#include <FL/Fl_Input.H>
 #include <FL/Fl_Scroll.H>
-#include <FL/fl_ask.H>
+#include <FL/Fl_Secret_Input.H>
 #include <FL/fl_draw.H>
+#include <FL/fl_utf8.h>
+#include <algorithm>
 #include <memory>
 #include <utility>
 
@@ -16,64 +21,197 @@ Fl_Color rgb(int r, int g, int b) {
     return fl_rgb_color(static_cast<uchar>(r), static_cast<uchar>(g), static_cast<uchar>(b));
 }
 
-Fl_Color sidebarColor()  { return rgb(30, 27, 75); }
-Fl_Color sidebarHover()  { return rgb(55, 48, 120); }
-Fl_Color accentColor()   { return rgb(79, 70, 229); }
-Fl_Color pageColor()     { return rgb(246, 244, 255); }
-Fl_Color hoverCard()     { return rgb(232, 228, 252); }
-Fl_Color textColor()     { return rgb(30, 27, 75); }
-Fl_Color mutedText()     { return rgb(90, 86, 130); }
+Fl_Color bgColor()      { return rgb(13, 13, 12); }
+Fl_Color surfaceColor() { return rgb(21, 21, 19); }
+Fl_Color lineColor()    { return rgb(38, 37, 31); }
+Fl_Color textColor()    { return rgb(233, 229, 220); }
+Fl_Color mutedColor()   { return rgb(138, 133, 122); }
+Fl_Color dimColor()     { return rgb(90, 86, 78); }
+Fl_Color accentColor()  { return rgb(200, 162, 106); }
 
-class FlatButton : public Fl_Button {
+const int kWinW = 980, kWinH = 640, kHeaderH = 80, kMargin = 56;
+
+// Draws text with extra space between letters (FLTK has no letter-spacing).
+void drawSpaced(const std::string& text, int x, int y, int h, int gap) {
+    int cursor = x;
+    for (std::size_t i = 0; i < text.size();) {
+        int len = fl_utf8len(text[i]);
+        if (len < 1) len = 1;
+        fl_draw(text.c_str() + i, len, cursor, y + h - fl_descent() - (h - fl_height()) / 2);
+        cursor += static_cast<int>(fl_width(text.c_str() + i, len)) + gap;
+        i += static_cast<std::size_t>(len);
+    }
+}
+
+std::string upper(std::string s) {
+    for (char& c : s) if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+    return s;
+}
+
+// Static text. `spacing` > 0 gives the wide letter-spaced label look.
+class Text : public Fl_Widget {
 public:
-    FlatButton(int x, int y, int w, int h, const std::string& label, Fl_Boxtype boxType,
-               Fl_Color normal, Fl_Color hover, Fl_Color active, Fl_Color text)
-        : Fl_Button(x, y, w, h), normal_(normal), hover_(hover), active_(active) {
-        copy_label(label.c_str());
-        box(boxType);
-        labelcolor(text);
-        labelsize(15);
-        align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
-        visible_focus(0);
-    }
-
-    void setSelected(bool selected) {
-        selected_ = selected;
-        redraw();
-    }
-
-    void setCard() { card_ = true; }
-
+    Text(int x, int y, int w, int h, const std::string& text, int size, Fl_Color color,
+         int spacing = 0, Fl_Font font = FL_HELVETICA)
+        : Fl_Widget(x, y, w, h), text_(text), size_(size), color_(color), spacing_(spacing),
+          font_(font) {}
     void draw() override {
-        Fl_Color fill = selected_ ? active_ : (hovering_ ? hover_ : normal_);
-        if (card_) {
-            fl_rectf(x(), y(), w(), h(), fill);
-            fl_color(rgb(205, 200, 240));
-            fl_rect(x(), y(), w(), h());
-            draw_label(x() + 6, y(), w() - 12, h());
-            return;
+        fl_font(font_, size_);
+        fl_color(color_);
+        if (spacing_ > 0) {
+            drawSpaced(text_, x(), y(), h(), spacing_);
+        } else {
+            fl_draw(text_.c_str(), x(), y(), w(), h(),
+                    FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_WRAP, nullptr, 0);
         }
-        color(fill);
-        Fl_Button::draw();
     }
+private:
+    std::string text_;
+    int size_;
+    Fl_Color color_;
+    int spacing_;
+    Fl_Font font_;
+};
 
+// Height needed to show `text` wrapped to `width` at `size`.
+int textHeight(const std::string& text, int width, int size) {
+    fl_font(FL_HELVETICA, size);
+    int w = width, h = 0;
+    fl_measure(text.c_str(), w, h, 0);
+    return h;
+}
+
+class Line : public Fl_Widget {
+public:
+    Line(int x, int y, int w) : Fl_Widget(x, y, w, 1) {}
+    void draw() override { fl_color(lineColor()); fl_rectf(x(), y(), w(), h()); }
+};
+
+// Dot next to the logo.
+class Dot : public Fl_Widget {
+public:
+    Dot(int x, int y) : Fl_Widget(x, y, 7, 7) {}
+    void draw() override { fl_color(accentColor()); fl_pie(x(), y(), 7, 7, 0, 360); }
+};
+
+class HoverButton : public Fl_Button {
+public:
+    HoverButton(int x, int y, int w, int h) : Fl_Button(x, y, w, h) { box(FL_NO_BOX); }
     int handle(int event) override {
         int result = Fl_Button::handle(event);
         if (event == FL_ENTER) {
             hovering_ = true;
+            if (window()) window()->cursor(FL_CURSOR_HAND);
             redraw();
-        } else if (event == FL_LEAVE) {
+            return 1;
+        }
+        if (event == FL_LEAVE) {
             hovering_ = false;
+            if (window()) window()->cursor(FL_CURSOR_DEFAULT);
             redraw();
         }
         return result;
     }
-
+protected:
+    bool hovering() const { return hovering_; }
 private:
-    Fl_Color normal_, hover_, active_;
     bool hovering_ = false;
+};
+
+// Top navigation entry: muted, brighter on hover, "—" in gold when selected.
+class NavButton : public HoverButton {
+public:
+    NavButton(int x, int y, int w, int h, const std::string& label)
+        : HoverButton(x, y, w, h) {
+        copy_label(label.c_str());
+    }
+    void setSelected(bool selected) { selected_ = selected; redraw(); }
+    void draw() override {
+        fl_color(bgColor());
+        fl_rectf(x(), y(), w(), h());
+        fl_font(FL_HELVETICA, 14);
+        const int prefix = static_cast<int>(fl_width("— "));
+        if (selected_) {
+            fl_color(accentColor());
+            fl_draw("— ", x(), y(), prefix, h(), FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
+        }
+        fl_color(selected_ || hovering() ? textColor() : mutedColor());
+        fl_draw(label(), x() + prefix, y(), w() - prefix, h(),
+                FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
+    }
+private:
     bool selected_ = false;
-    bool card_ = false;
+};
+
+// One list row: name on the left, arrow on the right, hairline underneath.
+class Row : public HoverButton {
+public:
+    Row(int x, int y, int w, int h, const std::string& label, bool first)
+        : HoverButton(x, y, w, h), first_(first) {
+        copy_label(label.c_str());
+    }
+    void draw() override {
+        fl_color(hovering() ? surfaceColor() : bgColor());
+        fl_rectf(x(), y(), w(), h());
+        fl_color(lineColor());
+        fl_rectf(x(), y() + h() - 1, w(), 1);
+        if (first_) fl_rectf(x(), y(), w(), 1);
+        const int indent = hovering() ? 14 : 0;
+        fl_font(FL_HELVETICA, 17);
+        fl_color(textColor());
+        fl_draw(label(), x() + indent, y(), w() - 60, h(), FL_ALIGN_LEFT | FL_ALIGN_INSIDE,
+                nullptr, 0);
+        fl_font(FL_HELVETICA, 16);
+        fl_color(hovering() ? accentColor() : dimColor());
+        fl_draw("→", x(), y(), w() - 14, h(), FL_ALIGN_RIGHT | FL_ALIGN_INSIDE, nullptr, 0);
+    }
+private:
+    bool first_;
+};
+
+// Text link with a hairline underneath; the line turns gold on hover.
+class LinkButton : public HoverButton {
+public:
+    LinkButton(int x, int y, int w, int h, const std::string& label, bool arrow)
+        : HoverButton(x, y, w, h), arrow_(arrow) {
+        copy_label(label.c_str());
+    }
+    void draw() override {
+        fl_color(bgColor());
+        fl_rectf(x(), y(), w(), h());
+        fl_font(FL_HELVETICA, 15);
+        const bool lit = hovering() || Fl::focus() == this;
+        fl_color(lit ? textColor() : mutedColor());
+        fl_draw(label(), x(), y(), w(), h() - 8, FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
+        if (arrow_) {
+            fl_color(accentColor());
+            fl_draw("→", x(), y(), w(), h() - 8, FL_ALIGN_RIGHT | FL_ALIGN_INSIDE, nullptr, 0);
+        }
+        fl_color(lit ? accentColor() : lineColor());
+        fl_rectf(x(), y() + h() - 2, w(), 1);
+    }
+private:
+    bool arrow_;
+};
+
+// Text input with only an underline, gold while focused.
+template <class Base>
+class Field : public Base {
+public:
+    Field(int x, int y, int w, int h) : Base(x, y, w, h) {
+        this->box(FL_FLAT_BOX);
+        this->color(surfaceColor());
+        this->textcolor(textColor());
+        this->textsize(16);
+        this->cursor_color(accentColor());
+        this->selection_color(rgb(98, 82, 55));
+        this->when(FL_WHEN_ENTER_KEY_ALWAYS);
+    }
+    void draw() override {
+        Base::draw();
+        fl_color(Fl::focus() == this ? accentColor() : mutedColor());
+        fl_rectf(this->x(), this->y() + this->h() - 1, this->w(), 1);
+    }
 };
 
 struct Binding {
@@ -92,56 +230,138 @@ public:
         items_.back()->fn = std::move(fn);
         return items_.back().get();
     }
-
 private:
     std::vector<std::unique_ptr<Binding>> items_;
 };
 
-Fl_Box* makeLabel(int x, int y, int w, int h, const std::string& text, int size, Fl_Color color,
-                  bool bold, Fl_Align align) {
-    Fl_Box* box = new Fl_Box(x, y, w, h);
-    box->copy_label(text.c_str());
-    box->labelsize(size);
-    box->labelfont(bold ? FL_HELVETICA_BOLD : FL_HELVETICA);
-    box->labelcolor(color);
-    box->align(align | FL_ALIGN_INSIDE);
-    return box;
-}
-
-void addItemButtons(const Menu& menu, int x, int y, int w, BindingList& bindings) {
-    for (std::size_t i = 0; i < menu.itemCount(); ++i) {
-        std::string label = "  " + menu.itemLabel(i) + (menu.itemSubmenu(i) ? "   >" : "");
-        FlatButton* button = new FlatButton(x, y, w, 46, label, FL_BORDER_BOX, FL_WHITE,
-                                            hoverCard(), FL_WHITE, textColor());
-        button->setCard();
-        const Menu* owner = &menu;
-        button->callback(trampoline, bindings.add([owner, i] { owner->invoke(i); }));
-        y += 56;
+// Window that treats Enter as the default action when nothing else used it.
+class DialogWindow : public Fl_Double_Window {
+public:
+    DialogWindow(int w, int h) : Fl_Double_Window(w, h) {}
+    std::function<void()> onEnter;
+    int handle(int event) override {
+        int used = Fl_Double_Window::handle(event);
+        if (!used && (event == FL_KEYBOARD || event == FL_SHORTCUT) &&
+            (Fl::event_key() == FL_Enter || Fl::event_key() == FL_KP_Enter) && onEnter) {
+            onEnter();
+            return 1;
+        }
+        return used;
     }
+};
+
+void centre(Fl_Window& window) {
+    int sx, sy, sw, sh;
+    Fl::screen_xywh(sx, sy, sw, sh);
+    window.position(sx + (sw - window.w()) / 2, sy + (sh - window.h()) / 2);
 }
 
-void runDialog(const Menu& menu) {
-    const int width = 420;
-    const int top = 76;
-    const int height = top + static_cast<int>(menu.itemCount()) * 56 + 84;
+enum class Kind { Message, Confirm, Text, Hidden };
+
+// One themed modal dialog used for every message and question.
+bool prompt(Kind kind, const std::string& message, std::string* value,
+            const std::string& initial = "") {
+    const int width = 480, pad = 40, inner = width - 2 * pad;
+    const int messageH = textHeight(message, inner, 15);
+    const bool input = kind == Kind::Text || kind == Kind::Hidden;
+    const int inputH = input ? 34 : 0;
+    const int height = 32 + 16 + 28 + messageH + (input ? 24 + inputH : 0) + 40 + 30 + 36;
 
     BindingList bindings;
-    Fl_Window dialog(width, height);
-    dialog.copy_label(menu.title().c_str());
-    dialog.color(pageColor());
+    bool accepted = false;
+    DialogWindow dialog(width, height);
+    dialog.copy_label("DigiWallet");
+    dialog.color(bgColor());
     dialog.set_modal();
+    dialog.xclass("DigiWallet");
 
-    makeLabel(30, 20, width - 60, 40, menu.title(), 22, textColor(), true, FL_ALIGN_LEFT);
-    addItemButtons(menu, 30, top, width - 60, bindings);
+    new Dot(pad, 41);
+    new Text(pad + 18, 32, inner, 24, "DIGIWALLET", 12, textColor(), 4, FL_HELVETICA_BOLD);
+    int y = 32 + 16 + 28;
+    new Text(pad, y, inner, messageH + 4, message, 15, mutedColor());
+    y += messageH;
 
-    FlatButton* back = new FlatButton(30, height - 64, width - 60, 44, "  " + menu.exitLabel(),
-                                      FL_BORDER_BOX, rgb(238, 236, 250), hoverCard(), hoverCard(),
-                                      textColor());
-    back->setCard();
-    Fl_Window* dialogPtr = &dialog;
-    back->callback(trampoline, bindings.add([dialogPtr] { dialogPtr->hide(); }));
+    Fl_Input* field = nullptr;
+    if (input) {
+        y += 24;
+        if (kind == Kind::Hidden) field = new Field<Fl_Secret_Input>(pad, y, inner, inputH);
+        else                      field = new Field<Fl_Input>(pad, y, inner, inputH);
+        field->value(initial.c_str());
+        y += inputH;
+    }
+    y += 40;
+
+    Fl_Window* win = &dialog;
+    auto accept = [&accepted, win, field, value] {
+        accepted = true;
+        if (field && value) *value = field->value();
+        if (field) field->value("");   // do not leave a typed password in the widget
+        win->hide();
+    };
+    auto cancel = [win, field] {
+        if (field) field->value("");
+        win->hide();
+    };
+
+    const bool twoButtons = kind != Kind::Message;
+    std::string primaryText = kind == Kind::Confirm ? "Yes"
+                              : (kind == Kind::Message ? "OK" : "Continue");
+    std::string secondaryText = kind == Kind::Confirm ? "No" : "Cancel";
+    fl_font(FL_HELVETICA, 15);
+    const int primaryW = static_cast<int>(fl_width(primaryText.c_str())) + 44;
+    const int secondaryW = static_cast<int>(fl_width(secondaryText.c_str())) + 8;
+
+    LinkButton* primary = new LinkButton(width - pad - primaryW, y, primaryW, 30, primaryText, true);
+    primary->callback(trampoline, bindings.add(accept));
+    if (twoButtons) {
+        LinkButton* secondary = new LinkButton(width - pad - primaryW - 28 - secondaryW, y,
+                                               secondaryW, 30, secondaryText, false);
+        secondary->callback(trampoline, bindings.add(cancel));
+    }
+    if (field) field->callback(trampoline, bindings.add(accept));
+    dialog.onEnter = accept;
 
     dialog.end();
+    centre(dialog);
+    dialog.show();
+    if (field) field->take_focus();
+    while (dialog.shown()) Fl::wait();
+    return accepted;
+}
+
+// A nested submenu opened from a page: same look, in its own small window.
+void runDialog(const Menu& menu) {
+    const int width = 480, pad = 40, inner = width - 2 * pad, rowH = 56;
+    const int rows = static_cast<int>(menu.itemCount());
+    const int height = 32 + 16 + 40 + 36 + rows * rowH + 40 + 30 + 36;
+
+    BindingList bindings;
+    DialogWindow dialog(width, height);
+    dialog.copy_label(menu.title().c_str());
+    dialog.color(bgColor());
+    dialog.set_modal();
+    dialog.xclass("DigiWallet");
+
+    new Text(pad, 32, inner, 24, upper(menu.title()), 12, dimColor(), 4);
+    new Text(pad, 68, inner, 44, menu.title(), 30, textColor());
+    int y = 68 + 44 + 24;
+    for (int i = 0; i < rows; ++i) {
+        std::string label = menu.itemLabel(static_cast<std::size_t>(i));
+        Row* row = new Row(pad, y, inner, rowH, label, i == 0);
+        const Menu* owner = &menu;
+        row->callback(trampoline, bindings.add([owner, i] {
+            owner->invoke(static_cast<std::size_t>(i));
+        }));
+        y += rowH;
+    }
+    Fl_Window* win = &dialog;
+    fl_font(FL_HELVETICA, 15);
+    const int backW = static_cast<int>(fl_width(menu.exitLabel().c_str())) + 44;
+    LinkButton* back = new LinkButton(pad, y + 36, backW, 30, menu.exitLabel(), false);
+    back->callback(trampoline, bindings.add([win] { win->hide(); }));
+
+    dialog.end();
+    centre(dialog);
     dialog.show();
     while (dialog.shown()) Fl::wait();
 }
@@ -150,31 +370,28 @@ void runDialog(const Menu& menu) {
 
 void init() {
     Fl::scheme("gtk+");
-    fl_message_title_default("DigiWallet");
+    Fl::background(13, 13, 12);
+    Fl::foreground(233, 229, 220);
 }
 
-void showMessage(const std::string& text) {
-    fl_message("%s", text.c_str());
-}
+void showMessage(const std::string& text) { prompt(Kind::Message, text, nullptr); }
 
 void notImplemented(const std::string& feature) {
-    fl_message("%s is not implemented yet.", feature.c_str());
+    showMessage(feature + " is not implemented yet.");
 }
 
-bool confirm(const std::string& question) {
-    return fl_choice("%s", "No", "Yes", nullptr, question.c_str()) == 1;
-}
+bool confirm(const std::string& question) { return prompt(Kind::Confirm, question, nullptr); }
 
-bool askText(const std::string& prompt, std::string& out, const std::string& initial) {
-    const char* answer = fl_input("%s", initial.c_str(), prompt.c_str());
-    if (!answer) return false;
+bool askText(const std::string& promptText, std::string& out, const std::string& initial) {
+    std::string answer;
+    if (!prompt(Kind::Text, promptText, &answer, initial)) return false;
     out = answer;
     return true;
 }
 
-bool askHidden(const std::string& prompt, std::string& out) {
-    const char* answer = fl_password("%s", "", prompt.c_str());
-    if (!answer) return false;
+bool askHidden(const std::string& promptText, std::string& out) {
+    std::string answer;
+    if (!prompt(Kind::Hidden, promptText, &answer)) return false;
     out = answer;
     return true;
 }
@@ -190,9 +407,7 @@ void Menu::addSubmenu(const std::string& label, Menu submenu) {
     items_.push_back({label, nullptr, std::make_shared<Menu>(std::move(submenu))});
 }
 
-void Menu::setWelcome(const std::string& text) {
-    welcome_ = text;
-}
+void Menu::setWelcome(const std::string& text) { welcome_ = text; }
 
 void Menu::invoke(std::size_t i) const {
     if (i >= items_.size()) return;
@@ -205,91 +420,123 @@ void Menu::invoke(std::size_t i) const {
 }
 
 void Menu::run() const {
-    const int winW = 860, winH = 560, sideW = 240;
-    const int pageX = sideW, pageW = winW - sideW;
-
+    const int contentW = kWinW - 2 * kMargin;
     BindingList bindings;
     std::vector<Fl_Widget*> pages;
-    std::vector<FlatButton*> pageButtons;
+    std::vector<NavButton*> navButtons;
 
-    Fl_Double_Window window(winW, winH);
+    Fl_Double_Window window(kWinW, kWinH);
     window.copy_label(title_.c_str());
     window.xclass("DigiWallet");
-    window.color(pageColor());
+    window.color(bgColor());
 
-    Fl_Box* sidebar = new Fl_Box(0, 0, sideW, winH);
-    sidebar->box(FL_FLAT_BOX);
-    sidebar->color(sidebarColor());
-    makeLabel(24, 26, sideW - 40, 40, title_, 24, FL_WHITE, true, FL_ALIGN_LEFT);
+    // Header: logo on the left, navigation on the right, hairline underneath.
+    new Dot(kMargin, kHeaderH / 2 - 3);
+    new Text(kMargin + 18, kHeaderH / 2 - 12, 220, 24, upper(title_), 12, textColor(), 4,
+             FL_HELVETICA_BOLD);
+    new Line(0, kHeaderH, kWinW);
 
-    Fl_Group* home = new Fl_Group(pageX, 0, pageW, winH);
+    // Pages. Page 0 is Home; each submenu gets its own scrolling page.
+    Fl_Group* home = new Fl_Group(0, kHeaderH + 1, kWinW, kWinH - kHeaderH - 1);
     home->box(FL_FLAT_BOX);
-    home->color(pageColor());
-    makeLabel(pageX + 40, 48, pageW - 80, 50, "Welcome", 30, textColor(), true, FL_ALIGN_LEFT);
-    std::string welcomeText = welcome_.empty() ? "Choose a section on the left to get started."
-                                               : welcome_;
-    makeLabel(pageX + 40, 110, pageW - 80, 200, welcomeText, 16, mutedText(), false,
-              FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_WRAP);
+    home->color(bgColor());
+    {
+        std::string text = welcome_.empty() ? "Choose a section above to get started." : welcome_;
+        std::string first = text, rest;
+        std::size_t split = text.find("\n\n");
+        if (split != std::string::npos) {
+            first = text.substr(0, split);
+            rest = text.substr(split + 2);
+        }
+        new Text(kMargin, 150, contentW, 20, "WELCOME", 12, dimColor(), 4);
+        const int headW = 620;
+        const int headH = textHeight(first, headW, 40) + 6;
+        new Text(kMargin, 190, headW, headH, first, 40, textColor());
+        if (!rest.empty())
+            new Text(kMargin, 190 + headH + 28, 460, 120, rest, 16, mutedColor());
+        new Line(0, kWinH - 76, kWinW);
+        new Dot(kMargin, kWinH - 41);
+        new Text(kMargin + 18, kWinH - 48, 300, 20, "Vault unlocked", 13, dimColor());
+    }
     home->end();
     pages.push_back(home);
 
-    std::vector<int> pageIndexOfItem(itemCount(), -1);
+    std::vector<int> pageOfItem(itemCount(), -1);
     for (std::size_t i = 0; i < itemCount(); ++i) {
         const Menu* sub = itemSubmenu(i);
         if (!sub) continue;
-        Fl_Scroll* page = new Fl_Scroll(pageX, 0, pageW, winH);
+        Fl_Scroll* page = new Fl_Scroll(0, kHeaderH + 1, kWinW, kWinH - kHeaderH - 1);
         page->box(FL_FLAT_BOX);
-        page->color(pageColor());
-        page->scrollbar_size(12);
+        page->color(bgColor());
+        page->type(Fl_Scroll::VERTICAL);
+        page->scrollbar_size(10);
+        page->scrollbar.box(FL_FLAT_BOX);
+        page->scrollbar.color(bgColor());
+        page->scrollbar.selection_color(lineColor());
+        page->scrollbar.slider(FL_FLAT_BOX);
         page->begin();
-        makeLabel(pageX + 40, 40, pageW - 80, 44, sub->title(), 26, textColor(), true,
-                  FL_ALIGN_LEFT);
-        addItemButtons(*sub, pageX + 40, 110, pageW - 120, bindings);
+        new Text(kMargin, 110, contentW, 20, "SECTION", 12, dimColor(), 4);
+        new Text(kMargin, 146, contentW, 56, sub->title(), 40, textColor());
+        int y = 236;
+        for (std::size_t j = 0; j < sub->itemCount(); ++j) {
+            Row* row = new Row(kMargin, y, contentW, 60, sub->itemLabel(j), j == 0);
+            row->callback(trampoline, bindings.add([sub, j] { sub->invoke(j); }));
+            y += 60;
+        }
+        new Fl_Box(kMargin, y, 1, 24);
         page->end();
         page->hide();
-        pageIndexOfItem[i] = static_cast<int>(pages.size());
+        pageOfItem[i] = static_cast<int>(pages.size());
         pages.push_back(page);
     }
 
-    auto showPage = [&pages, &pageButtons, &window](int index) {
+    auto showPage = [&pages, &navButtons, &window](int index) {
         for (std::size_t p = 0; p < pages.size(); ++p) {
             if (static_cast<int>(p) == index) pages[p]->show(); else pages[p]->hide();
-            if (p < pageButtons.size()) pageButtons[p]->setSelected(static_cast<int>(p) == index);
+            if (p < navButtons.size()) navButtons[p]->setSelected(static_cast<int>(p) == index);
         }
         window.redraw();
     };
 
-    int y = 100;
-    FlatButton* homeButton = new FlatButton(12, y, sideW - 24, 44, "  Home", FL_FLAT_BOX,
-                                            sidebarColor(), sidebarHover(), accentColor(),
-                                            FL_WHITE);
-    homeButton->callback(trampoline, bindings.add([showPage] { showPage(0); }));
-    pageButtons.push_back(homeButton);
-    y += 50;
-
+    // Navigation, laid out right to left so it hugs the right margin.
+    struct NavSpec { std::string label; int page; int action; };
+    std::vector<NavSpec> specs;
+    specs.push_back({"Home", 0, -1});
     for (std::size_t i = 0; i < itemCount(); ++i) {
-        FlatButton* button = new FlatButton(12, y, sideW - 24, 44, "  " + itemLabel(i),
-                                            FL_FLAT_BOX, sidebarColor(), sidebarHover(),
-                                            accentColor(), FL_WHITE);
-        if (pageIndexOfItem[i] >= 0) {
-            int target = pageIndexOfItem[i];
-            button->callback(trampoline, bindings.add([showPage, target] { showPage(target); }));
-            pageButtons.push_back(button);
-        } else {
-            const Menu* self = this;
-            button->callback(trampoline, bindings.add([self, i] { self->invoke(i); }));
-        }
-        y += 50;
+        if (pageOfItem[i] >= 0) specs.push_back({itemLabel(i), pageOfItem[i], -1});
+        else                    specs.push_back({itemLabel(i), -1, static_cast<int>(i)});
     }
+    specs.push_back({exitLabel_, -1, -2});
 
-    FlatButton* exitButton = new FlatButton(12, winH - 64, sideW - 24, 44, "  " + exitLabel_,
-                                            FL_FLAT_BOX, sidebarColor(), sidebarHover(),
-                                            sidebarHover(), FL_WHITE);
+    fl_font(FL_HELVETICA, 14);
+    const int prefixW = static_cast<int>(fl_width("— "));
+    const int gap = 26;
+    int total = 0;
+    for (const NavSpec& s : specs)
+        total += prefixW + static_cast<int>(fl_width(s.label.c_str())) + 4 + gap;
+    total -= gap;
+    int x = kWinW - kMargin - total;
     Fl_Window* windowPtr = &window;
-    exitButton->callback(trampoline, bindings.add([windowPtr] { windowPtr->hide(); }));
+    const Menu* self = this;
+    for (const NavSpec& s : specs) {
+        const int w = prefixW + static_cast<int>(fl_width(s.label.c_str())) + 4;
+        NavButton* button = new NavButton(x, kHeaderH / 2 - 14, w, 28, s.label);
+        if (s.page >= 0) {
+            const int target = s.page;
+            button->callback(trampoline, bindings.add([showPage, target] { showPage(target); }));
+            navButtons.push_back(button);
+        } else if (s.action == -2) {
+            button->callback(trampoline, bindings.add([windowPtr] { windowPtr->hide(); }));
+        } else {
+            const std::size_t item = static_cast<std::size_t>(s.action);
+            button->callback(trampoline, bindings.add([self, item] { self->invoke(item); }));
+        }
+        x += w + gap;
+    }
 
     window.end();
     showPage(0);
+    centre(window);
     window.show();
     Fl::run();
 }

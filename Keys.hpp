@@ -1,0 +1,1 @@
+// Keys.hpp - Key Manager. Turns the master password into encryption keys: one slow, salted derivation for the master key, then a separate key for each data file. Wipes keys from memory on lock.

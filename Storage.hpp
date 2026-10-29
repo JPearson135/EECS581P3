@@ -1,0 +1,1 @@
+// Storage.hpp - Secure File Store. Reads and writes the encrypted data files in $HOME/.digiwallet using atomic writes and owner-only permissions.

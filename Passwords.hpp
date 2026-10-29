@@ -1,0 +1,1 @@
+// Passwords.hpp - Password Manager feature. Add, view, edit, delete and search saved logins; generate random passwords and rate their strength.
