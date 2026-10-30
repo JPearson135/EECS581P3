@@ -48,7 +48,7 @@ void guarded(const std::function<void()>& action) {
 bool askValid(const std::string& prompt, std::string& out, bool hidden,
               const std::function<std::string(const std::string&)>& problem) {
     while (true) {
-        const bool answered = hidden ? askHidden(prompt, out) : askText(prompt, out);
+        const bool answered = hidden ? askHidden(prompt, out, true) : askText(prompt, out);
         if (!answered) return false;
         const std::string why = problem(out);
         if (why.empty()) return true;
@@ -157,12 +157,10 @@ void viewCards(wallet::CardWallet& cards) {
             showMessage(c.label + "\n\nName: " + (c.holder.empty() ? "(none)" : c.holder) +
                         "\nNumber: " + c.masked + "\nExpires: " + c.expiry + (c.expired ? "  (expired)" : ""));
         }
-        if (!confirm("Show the full card number for \"" + *label + "\"?")) return;
+
         const auto number = cards.revealNumber(*label);
         if (!number) return;
-        std::string text = *label + "\n\n" + std::string(number->view());
-        showMessage(text);
-        wipe(text);
+        showSecret(*label + " — Card number", std::string(number->view()));
     });
 }
 

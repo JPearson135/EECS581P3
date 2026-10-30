@@ -8,6 +8,10 @@ ifneq ($(OPENSSL_PREFIX),)
   CPPFLAGS += -I$(OPENSSL_PREFIX)/include
   LDFLAGS += -L$(OPENSSL_PREFIX)/lib
 endif
+# Homebrew can move image libraries when upgrading; use its stable opt paths.
+ifeq ($(shell uname -s),Darwin)
+  LDFLAGS += -L$(shell brew --prefix libpng 2>/dev/null)/lib -L$(shell brew --prefix jpeg-turbo 2>/dev/null)/lib
+endif
 LDLIBS += -lcrypto
 
 APP_NAME  = DigiWallet
@@ -29,12 +33,12 @@ ifneq ($(MAKECMDGOALS),clean)
   FLTK_CXXFLAGS := $(shell $(FLTK_CONFIG) --cxxflags)
   ifeq ($(PLATFORM),windows)
     ifeq ($(STATIC),0)
-      FLTK_LDFLAGS := $(shell $(FLTK_CONFIG) --ldflags) -mwindows
+      FLTK_LDFLAGS := $(shell $(FLTK_CONFIG) --use-images --ldflags) -mwindows
     else
       FLTK_LDFLAGS := $(shell $(FLTK_CONFIG) --ldstaticflags) -static -static-libgcc -static-libstdc++ -mwindows
     endif
   else
-    FLTK_LDFLAGS := $(shell $(FLTK_CONFIG) --ldflags)
+    FLTK_LDFLAGS := $(shell $(FLTK_CONFIG) --use-images --ldflags)
   endif
 endif
 

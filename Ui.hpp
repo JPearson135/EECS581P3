@@ -8,10 +8,11 @@
 namespace ui {
 void init();
 void showMessage(const std::string& text);
+void showSecret(const std::string& description, const std::string& secret);
 void notImplemented(const std::string& feature);
 bool confirm(const std::string& question);
 bool askText(const std::string& prompt, std::string& out, const std::string& initial = "");
-bool askHidden(const std::string& prompt, std::string& out);
+bool askHidden(const std::string& prompt, std::string& out, bool allowReveal = true);
 class Menu {
 public:
     using Action = std::function<void()>;

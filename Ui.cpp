@@ -6,6 +6,8 @@
 #include <FL/Fl_Button.H>
 #include <FL/Fl_Double_Window.H>
 #include <FL/Fl_Input.H>
+#include <FL/Fl_PNG_Image.H>
+#include "EyeIcons.hpp"
 #include <FL/Fl_Scroll.H>
 #include <FL/Fl_Secret_Input.H>
 #include <FL/fl_draw.H>
@@ -116,6 +118,18 @@ protected:
     bool hovering() const { return hovering_; }
 private:
     bool hovering_ = false;
+};
+
+// Borderless eye button; retain normal keyboard navigation.
+class EyeButton : public Fl_Button {
+public:
+    EyeButton(int x, int y, int w, int h) : Fl_Button(x, y, w, h) {}
+    void draw() override {
+        fl_color(color());
+        fl_rectf(x(), y(), w(), h());
+        if (image()) image()->draw(x() + (w() - image()->w()) / 2,
+                                   y() + (h() - image()->h()) / 2);
+    }
 };
 
 // Top navigation entry: muted, brighter on hover, "—" in gold when selected.
@@ -260,7 +274,17 @@ enum class Kind { Message, Confirm, Text, Hidden };
 
 // One themed modal dialog used for every message and question.
 bool prompt(Kind kind, const std::string& message, std::string* value,
-            const std::string& initial = "") {
+            const std::string& initial = "", bool allowReveal = false, bool readOnly = false) {
+    Fl_PNG_Image hiddenImage("hidden", hiddenIcon, sizeof(hiddenIcon));
+    Fl_PNG_Image visibleImage("visible", visibleIcon, sizeof(visibleIcon));
+    // Keep four physical pixels per logical pixel for crisp Retina rendering.
+    // The open-eye artwork has more transparent padding, so compensate optically.
+    Fl_Image::RGB_scaling(FL_RGB_SCALING_BILINEAR);
+    Fl_Image::scaling_algorithm(FL_RGB_SCALING_BILINEAR);
+    std::unique_ptr<Fl_Image> hiddenDisplay(hiddenImage.copy(96, 96));
+    std::unique_ptr<Fl_Image> visibleDisplay(visibleImage.copy(104, 104));
+    hiddenDisplay->scale(24, 24);
+    visibleDisplay->scale(26, 26);
     const int width = 480, pad = 40, inner = width - 2 * pad;
     const int messageH = textHeight(message, inner, 15);
     const bool input = kind == Kind::Text || kind == Kind::Hidden;
@@ -287,6 +311,23 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
         if (kind == Kind::Hidden) field = new Field<Fl_Secret_Input>(pad, y, inner, inputH);
         else                      field = new Field<Fl_Input>(pad, y, inner, inputH);
         field->value(initial.c_str());
+        field->readonly(readOnly);
+        if (kind == Kind::Hidden && allowReveal) {
+            field->size(inner - 52, inputH);
+            auto* toggle = new EyeButton(width - pad - 44, y - 5, 44, 44);
+            toggle->box(FL_FLAT_BOX);
+            toggle->color(bgColor());
+            toggle->image(visibleDisplay.get());
+            toggle->tooltip("Show text");
+            toggle->callback(trampoline, bindings.add([field, toggle, &hiddenDisplay, &visibleDisplay] {
+                const bool reveal = field->type() == FL_SECRET_INPUT;
+                field->type(reveal ? FL_NORMAL_INPUT : FL_SECRET_INPUT);
+                toggle->image(reveal ? hiddenDisplay.get() : visibleDisplay.get());
+                toggle->tooltip(reveal ? "Hide text" : "Show text");
+                field->redraw();
+                toggle->redraw();
+            }));
+        }
         y += inputH;
     }
     y += 40;
@@ -303,9 +344,9 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
         win->hide();
     };
 
-    const bool twoButtons = kind != Kind::Message;
+    const bool twoButtons = kind != Kind::Message && !readOnly;
     std::string primaryText = kind == Kind::Confirm ? "Yes"
-                              : (kind == Kind::Message ? "OK" : "Continue");
+                              : (kind == Kind::Message || readOnly ? "OK" : "Continue");
     std::string secondaryText = kind == Kind::Confirm ? "No" : "Cancel";
     fl_font(FL_HELVETICA, 15);
     const int primaryW = static_cast<int>(fl_width(primaryText.c_str())) + 44;
@@ -376,6 +417,10 @@ void init() {
 
 void showMessage(const std::string& text) { prompt(Kind::Message, text, nullptr); }
 
+void showSecret(const std::string& description, const std::string& secret) {
+    prompt(Kind::Hidden, description, nullptr, secret, true, true);
+}
+
 void notImplemented(const std::string& feature) {
     showMessage(feature + " is not implemented yet.");
 }
@@ -389,9 +434,9 @@ bool askText(const std::string& promptText, std::string& out, const std::string&
     return true;
 }
 
-bool askHidden(const std::string& promptText, std::string& out) {
+bool askHidden(const std::string& promptText, std::string& out, bool allowReveal) {
     std::string answer;
-    if (!prompt(Kind::Hidden, promptText, &answer)) return false;
+    if (!prompt(Kind::Hidden, promptText, &answer, "", allowReveal)) return false;
     out = answer;
     return true;
 }
