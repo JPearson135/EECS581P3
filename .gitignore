@@ -8,3 +8,9 @@ data/
 *.enc
 *.o
 *.d
+# Never commit local secrets or machine-specific files
+vault.meta
+.lock
+.DS_Store
+__MACOSX/
+*.zip

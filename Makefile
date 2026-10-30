@@ -44,7 +44,7 @@ DEPS      = $(OBJS:.o=.d)
 LIB_OBJS  = $(filter-out $(BUILD_DIR)/Main.o,$(OBJS))
 PREFIX   ?= $(HOME)/.local
 
-.PHONY: all build run app debug test clean install
+.PHONY: all build run app debug test test-security test-wallet test-all check-deps clean install
 
 all: build
 
@@ -98,6 +98,38 @@ else
 test:
 	@echo "No tests yet: add Tests/test_main.cpp to enable 'make test'."
 endif
+
+# ---- Tests that do not need FLTK ----
+# test-security: Crypto Service, Secure File Store, Key Manager.
+# test-wallet:   Bank Card Wallet (also uses the three above).
+# Add --slow to the runner by hand to also check the full-cost scrypt settings:
+#   ./obj/test_security --slow
+SECURITY_OBJS = $(BUILD_DIR)/Crypto.o $(BUILD_DIR)/Keys.o $(BUILD_DIR)/Storage.o
+WALLET_OBJS   = $(SECURITY_OBJS) $(BUILD_DIR)/Wallet.o
+
+test-security: $(BUILD_DIR)/test_security$(EXE)
+	./$(BUILD_DIR)/test_security$(EXE)
+
+$(BUILD_DIR)/test_security$(EXE): Tests/test_security.cpp $(SECURITY_OBJS) | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ Tests/test_security.cpp $(SECURITY_OBJS) $(LDFLAGS) $(LDLIBS)
+
+test-wallet: $(BUILD_DIR)/test_wallet$(EXE)
+	./$(BUILD_DIR)/test_wallet$(EXE)
+
+$(BUILD_DIR)/test_wallet$(EXE): Tests/test_wallet.cpp $(WALLET_OBJS) | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ Tests/test_wallet.cpp $(WALLET_OBJS) $(LDFLAGS) $(LDLIBS)
+
+test-all: test-security test-wallet test
+
+# Prints what this computer has and fails with a clear message if something is missing or too old.
+check-deps:
+	@echo "Compiler: $$($(CXX) --version | head -n 1)"
+	@echo "FLTK:     $$($(FLTK_CONFIG) --version)"
+	@printf '#include <openssl/opensslv.h>\n#include <openssl/core_names.h>\nOPENSSL_VERSION_TEXT\n' | $(CXX) $(CPPFLAGS) -E -x c++ - 2>/dev/null | tail -n 1 | sed 's/^/OpenSSL:   /' ; \
+	printf '#include <openssl/evp.h>\n#include <openssl/core_names.h>\nint main(){return 0;}\n' | $(CXX) $(CPPFLAGS) -x c++ -fsyntax-only - 2>/dev/null \
+	  && echo "OpenSSL 3.x headers: OK" \
+	  || { echo "OpenSSL 3.x headers: NOT FOUND (need OpenSSL 3.0 or newer). See 'Dependencies' in README.md"; exit 1; }
+	@echo "All required dependencies found."
 
 install: build
 	mkdir -p $(PREFIX)/bin
