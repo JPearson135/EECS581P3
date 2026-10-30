@@ -535,6 +535,9 @@ void Menu::run() const {
     }
 
     window.end();
+    // Let FLTK grow the page layout and enable the native resize/fullscreen controls.
+    window.resizable(window);
+    window.size_range(kWinW, kWinH);
     showPage(0);
     centre(window);
     window.show();
