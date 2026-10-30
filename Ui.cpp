@@ -1,6 +1,8 @@
 // Ui.cpp - FLTK front end. Dark, minimal look: near-black background, hairline
 // dividers, light text, one gold accent, uppercase spaced labels.
 #include "Ui.hpp"
+#include "Wallet.hpp"
+#include <ctime>
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Button.H>
@@ -228,6 +230,137 @@ public:
     }
 };
 
+class CardNumberField : public Field<Fl_Secret_Input> {
+public:
+    std::function<void()> onBlur, onEdit;
+    using Field<Fl_Secret_Input>::Field;
+    void draw() override {
+        if (type() != FL_SECRET_INPUT || !value()[0]) {
+            Field<Fl_Secret_Input>::draw();
+        } else {
+            // Draw the mask ourselves: separators are gaps, never secret-input dots.
+            fl_color(color());
+            fl_rectf(x(), y(), w(), h());
+            fl_color(Fl::focus() == this ? accentColor() : mutedColor());
+            fl_rectf(x(), y() + h() - 1, w(), 1);
+            fl_push_clip(x() + 3, y() + 1, w() - 6, h() - 3);
+            const int advance = 11;
+            const int first = std::min(position(), mark());
+            const int last = std::max(position(), mark());
+            for (int i = 0; value()[i]; ++i) {
+                const int px = x() + 4 + i * advance;
+                if (Fl::focus() == this && i >= first && i < last) {
+                    fl_color(selection_color());
+                    fl_rectf(px, y() + 2, advance, h() - 4);
+                }
+                if (value()[i] != ' ') {
+                    fl_color(textcolor());
+                    fl_pie(px + 2, y() + h() / 2 - 3, 6, 6, 0, 360);
+                }
+            }
+            if (Fl::focus() == this && first == last) {
+                const int cx = x() + 4 + position() * advance;
+                fl_color(cursor_color());
+                fl_line(cx, y() + 5, cx, y() + h() - 5);
+            }
+            fl_pop_clip();
+        }
+        // A visual hint only: never part of the input value or saved card number.
+        // Keep it visible while focused until the user enters a character.
+        if (!value()[0]) {
+            fl_push_clip(x() + 3, y() + 1, w() - 6, h() - 3);
+            fl_font(textfont(), textsize());
+            fl_color(mutedColor());
+            fl_draw("1234 1234 1234 1234", x() + 3, y(), w() - 6, h(),
+                    FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
+            fl_pop_clip();
+        }
+    }
+    int handle(int event) override {
+        // Let Backspace at a separator delete the preceding digit too.
+        if (event == FL_KEYBOARD && Fl::event_key() == FL_BackSpace &&
+            position() == mark() && position() > 0 && value()[position() - 1] == ' ')
+            position(position() - 1);
+        const int used = Field<Fl_Secret_Input>::handle(event);
+        if (event == FL_UNFOCUS && onBlur) onBlur();
+        if (event != FL_KEYBOARD && event != FL_PASTE) return used;
+        std::string digits;
+        int before = 0;
+        const int cursor = position();
+        for (int i = 0; value()[i]; ++i) {
+            if (value()[i] == ' ') continue;
+            if (i < cursor) ++before;
+            digits += value()[i];
+        }
+        std::string formatted;
+        int newCursor = 0;
+        for (std::size_t i = 0; i < digits.size(); ++i) {
+            if (i && i % 4 == 0) formatted += ' ';
+            formatted += digits[i];
+            if (static_cast<int>(i) < before) newCursor = static_cast<int>(formatted.size());
+        }
+        // Advance across the separator as soon as a four-digit group is complete.
+        // Do not reinsert it while the user is deleting or moving the cursor.
+        const bool inserting = event == FL_PASTE ||
+            (event == FL_KEYBOARD && Fl::event_length() > 0 &&
+             Fl::event_key() != FL_BackSpace && Fl::event_key() != FL_Delete);
+        if (inserting && before > 0 && before % 4 == 0 && before != 16) {
+            if (before == static_cast<int>(digits.size())) formatted += ' ';
+            ++newCursor;
+        }
+        if (formatted != value()) value(formatted.c_str());
+        if (inserting) position(newCursor);
+        if (onEdit) onEdit();
+        // Clear temporary copies of the card number.
+        for (volatile char* p = digits.empty() ? nullptr : &digits[0]; p && p < &digits[0] + digits.size(); ++p) *p = 0;
+        for (volatile char* p = formatted.empty() ? nullptr : &formatted[0]; p && p < &formatted[0] + formatted.size(); ++p) *p = 0;
+        return used;
+    }
+};
+
+class ExpiryField : public Field<Fl_Input> {
+public:
+    std::function<void()> onBlur, onEdit;
+    using Field<Fl_Input>::Field;
+    void draw() override {
+        Field<Fl_Input>::draw();
+        if (!value()[0]) {
+            fl_font(textfont(), textsize());
+            fl_color(mutedColor());
+            fl_draw("MM/YY", x() + 3, y(), w() - 6, h(),
+                    FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
+        }
+    }
+    int handle(int event) override {
+        if (event == FL_KEYBOARD && Fl::event_key() == FL_BackSpace &&
+            position() == mark() && position() == 3 && value()[2] == '/') position(2);
+        const int used = Field<Fl_Input>::handle(event);
+        if (event == FL_UNFOCUS && onBlur) onBlur();
+        if (event != FL_KEYBOARD && event != FL_PASTE) return used;
+        std::string digits;
+        int before = 0;
+        const int cursor = position();
+        for (int i = 0; value()[i]; ++i) {
+            if (value()[i] < '0' || value()[i] > '9') continue;
+            if (digits.size() == 4) break;
+            if (i < cursor) ++before;
+            digits += value()[i];
+        }
+        const bool inserting = event == FL_PASTE ||
+            (event == FL_KEYBOARD && Fl::event_length() > 0 &&
+             Fl::event_key() != FL_BackSpace && Fl::event_key() != FL_Delete);
+        std::string formatted = digits;
+        if (digits.size() > 2 || (digits.size() == 2 && inserting)) formatted.insert(2, "/");
+        int next = before + (before >= 2 && formatted.size() >= 3 ? 1 : 0);
+        if (formatted != value()) {
+            value(formatted.c_str());
+            position(next);
+        } else if (inserting) position(next);
+        if (onEdit) onEdit();
+        return used;
+    }
+};
+
 struct Binding {
     std::function<void()> fn;
 };
@@ -274,7 +407,7 @@ enum class Kind { Message, Confirm, Text, Hidden };
 
 // One themed modal dialog used for every message and question.
 bool prompt(Kind kind, const std::string& message, std::string* value,
-            const std::string& initial = "", bool allowReveal = false, bool readOnly = false) {
+            const std::string& initial = "", bool allowReveal = false, bool readOnly = false, bool cardNumber = false, bool expiry = false) {
     Fl_PNG_Image hiddenImage("hidden", hiddenIcon, sizeof(hiddenIcon));
     Fl_PNG_Image visibleImage("visible", visibleIcon, sizeof(visibleIcon));
     // Keep four physical pixels per logical pixel for crisp Retina rendering.
@@ -308,7 +441,9 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
     Fl_Input* field = nullptr;
     if (input) {
         y += 24;
-        if (kind == Kind::Hidden) field = new Field<Fl_Secret_Input>(pad, y, inner, inputH);
+        if (expiry) field = new ExpiryField(pad, y, inner, inputH);
+        else if (cardNumber) field = new CardNumberField(pad, y, inner, inputH);
+        else if (kind == Kind::Hidden) field = new Field<Fl_Secret_Input>(pad, y, inner, inputH);
         else                      field = new Field<Fl_Input>(pad, y, inner, inputH);
         field->value(initial.c_str());
         field->readonly(readOnly);
@@ -409,6 +544,123 @@ void runDialog(const Menu& menu) {
 
 }
 
+std::string expiryProblem(const std::string& expiry) {
+    if (!wallet::CardWallet::normalizeExpiry(expiry)) return "Enter a valid expiration date as MM/YY.";
+    const std::time_t now = std::time(nullptr);
+    std::tm local{};
+    localtime_r(&now, &local);
+    if (wallet::CardWallet::isExpired(expiry, local.tm_year + 1900, local.tm_mon + 1))
+        return "This card has expired. You can still save it.";
+    return "";
+}
+
+void addCardForm(const CardSubmit& submit) {
+    Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
+    Fl_PNG_Image visibleSource("visible", visibleIcon, sizeof(visibleIcon));
+    Fl_Image::RGB_scaling(FL_RGB_SCALING_BILINEAR);
+    std::unique_ptr<Fl_Image> hidden(hiddenSource.copy(96, 96));
+    std::unique_ptr<Fl_Image> visible(visibleSource.copy(104, 104));
+    hidden->scale(24, 24);
+    visible->scale(26, 26);
+    BindingList bindings;
+    DialogWindow dialog(540, 660);
+    dialog.copy_label("Add card");
+    dialog.color(bgColor());
+    dialog.set_modal();
+    new Text(40, 28, 460, 36, "Add card", 28, textColor());
+    const char* labels[] = {"Card Name", "Name on Card (optional)", "Card Number", "Expiration Date"};
+    Fl_PNG_Image warningSource("warning", warningIcon, sizeof(warningIcon));
+    std::unique_ptr<Fl_Image> warning(warningSource.copy(96, 96));
+    warning->scale(24, 24);
+    Fl_Input* fields[4];
+    Fl_Box* errors[4];
+    Fl_Box* warnings[4];
+    for (int i = 0; i < 4; ++i) {
+        int y = 92 + i * 118;
+        new Text(40, y, 460, 24, labels[i], 15, mutedColor());
+        if (i == 2) fields[i] = new CardNumberField(40, y + 30, 364, 34);
+        else if (i == 3) fields[i] = new ExpiryField(40, y + 30, 416, 34);
+        else fields[i] = new Field<Fl_Input>(40, y + 30, 416, 34);
+        warnings[i] = new Fl_Box(468, y + 35, 24, 24);
+        warnings[i]->image(warning.get());
+        warnings[i]->hide();
+        errors[i] = new Fl_Box(40, y + 68, 460, 44);
+        errors[i]->labelsize(13);
+        errors[i]->labelcolor(accentColor());
+        errors[i]->align(FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_INSIDE | FL_ALIGN_WRAP);
+    }
+    auto* toggle = new EyeButton(412, 353, 44, 44);
+    toggle->color(bgColor());
+    toggle->image(visible.get());
+    toggle->tooltip("Show card number");
+    toggle->callback(trampoline, bindings.add([&] {
+        bool reveal = fields[2]->type() == FL_SECRET_INPUT;
+        fields[2]->type(reveal ? FL_NORMAL_INPUT : FL_SECRET_INPUT);
+        toggle->image(reveal ? hidden.get() : visible.get());
+        toggle->tooltip(reveal ? "Hide card number" : "Show card number");
+        fields[2]->redraw();
+        toggle->redraw();
+    }));
+    auto* numberInput = static_cast<CardNumberField*>(fields[2]);
+    auto numberValid = [&] {
+        std::string number = fields[2]->value();
+        number.erase(std::remove(number.begin(), number.end(), ' '), number.end());
+        const bool valid = wallet::CardWallet::normalizeNumber(number).has_value();
+        for (volatile char* p = number.empty() ? nullptr : &number[0]; p && p < &number[0] + number.size(); ++p) *p = 0;
+        return valid;
+    };
+    numberInput->onBlur = [&] {
+        const bool valid = numberValid();
+        errors[2]->copy_label(valid ? "" : "Check the card number: use 12–19 digits and a valid card checksum.");
+        if (valid) warnings[2]->hide(); else warnings[2]->show();
+        dialog.redraw();
+    };
+    numberInput->onEdit = [&] {
+        if (numberValid()) {
+            errors[2]->copy_label("");
+            warnings[2]->hide();
+            dialog.redraw();
+        }
+    };
+    auto* expiryInput = static_cast<ExpiryField*>(fields[3]);
+    auto validateExpiry = [&] {
+        const std::string problem = expiryProblem(fields[3]->value());
+        errors[3]->copy_label(problem.c_str());
+        if (problem.empty()) warnings[3]->hide(); else warnings[3]->show();
+        dialog.redraw();
+    };
+    expiryInput->onBlur = validateExpiry;
+    expiryInput->onEdit = [&] {
+        if (expiryProblem(fields[3]->value()).empty()) {
+            errors[3]->copy_label("");
+            warnings[3]->hide();
+            dialog.redraw();
+        }
+    };
+    auto save = [&] {
+        std::string number = fields[2]->value();
+        number.erase(std::remove(number.begin(), number.end(), ' '), number.end());
+        CardFormError problem;
+        for (int i = 0; i < 4; ++i) { errors[i]->copy_label(""); warnings[i]->hide(); }
+        try { problem = submit(fields[0]->value(), fields[1]->value(), number, fields[3]->value()); }
+        catch (const std::exception&) { problem = {0, "Could not save the card. Please try again."}; }
+        std::fill(number.begin(), number.end(), '\0');
+        if (problem.message.empty()) { fields[2]->value(""); dialog.hide(); }
+        else { errors[problem.field]->copy_label(problem.message.c_str()); warnings[problem.field]->show(); dialog.redraw(); }
+    };
+    auto* cancel = new LinkButton(280, 610, 90, 30, "Cancel", false);
+    cancel->callback(trampoline, bindings.add([&] { fields[2]->value(""); dialog.hide(); }));
+    auto* button = new LinkButton(390, 610, 110, 30, "Save card", true);
+    button->callback(trampoline, bindings.add(save));
+    for (auto* field : fields) field->callback(trampoline, bindings.add(save));
+    dialog.end();
+    centre(dialog);
+    dialog.show();
+    fields[0]->take_focus();
+    while (dialog.shown()) Fl::wait();
+    fields[2]->value("");
+}
+
 void init() {
     Fl::scheme("gtk+");
     Fl::background(13, 13, 12);
@@ -434,9 +686,16 @@ bool askText(const std::string& promptText, std::string& out, const std::string&
     return true;
 }
 
-bool askHidden(const std::string& promptText, std::string& out, bool allowReveal) {
+bool askExpiry(const std::string& promptText, std::string& out) {
     std::string answer;
-    if (!prompt(Kind::Hidden, promptText, &answer, "", allowReveal)) return false;
+    if (!prompt(Kind::Text, promptText, &answer, "", false, false, false, true)) return false;
+    out = answer;
+    return true;
+}
+
+bool askHidden(const std::string& promptText, std::string& out, bool allowReveal, bool cardNumber) {
+    std::string answer;
+    if (!prompt(Kind::Hidden, promptText, &answer, "", allowReveal, false, cardNumber)) return false;
     out = answer;
     return true;
 }

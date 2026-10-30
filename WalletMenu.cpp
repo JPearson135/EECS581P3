@@ -3,6 +3,7 @@
 #include <FL/Fl.H>
 #include <FL/Fl_Window.H>
 #include <exception>
+#include <algorithm>
 #include <functional>
 #include <optional>
 #include <string>
@@ -46,10 +47,11 @@ void guarded(const std::function<void()>& action) {
 // Asks until the answer is acceptable. "problem" returns an explanation, or "" if the answer is fine.
 // Returns false if the user cancels.
 bool askValid(const std::string& prompt, std::string& out, bool hidden,
-              const std::function<std::string(const std::string&)>& problem) {
+              const std::function<std::string(const std::string&)>& problem, bool expiry = false) {
     while (true) {
-        const bool answered = hidden ? askHidden(prompt, out, true) : askText(prompt, out);
+        const bool answered = hidden ? askHidden(prompt, out, true, true) : (expiry ? askExpiry(prompt, out) : askText(prompt, out));
         if (!answered) return false;
+        if (hidden) out.erase(std::remove(out.begin(), out.end(), ' '), out.end());
         const std::string why = problem(out);
         if (why.empty()) return true;
         showMessage(why);
@@ -100,51 +102,19 @@ std::optional<std::string> pickCard(const wallet::CardWallet& cards, const std::
 
 void addCard(wallet::CardWallet& cards) {
     if (!ready(cards)) return;
-    std::string label, holder, number, expiry;
-    const auto existing = cards.list();
-
-    bool done = askValid("Give this card a label (for example \"Travel Visa\"):", label, false,
-        [&existing](const std::string& s) -> std::string {
-            if (!wallet::CardWallet::validLabel(s))
-                return "A label needs 1 to 40 characters, with no space at the start or end.";
-            for (const auto& c : existing) {
-                std::string a = c.label, b = s;
-                for (char& ch : a) if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
-                for (char& ch : b) if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
-                if (a == b) return "You already have a card with that label.";
-            }
-            return "";
-        });
-    done = done && askValid("Name on the card (you can leave this empty):", holder, false,
-        [](const std::string& s) -> std::string {
-            return wallet::CardWallet::validHolder(s) ? "" : "That name is too long (64 characters at most).";
-        });
-    // The number is typed hidden, like a password. The check digit catches most typing mistakes.
-    done = done && askValid("Card number (digits only, no spaces or dashes):", number, true,
-        [](const std::string& s) -> std::string {
-            if (s.find_first_not_of("0123456789") != std::string::npos)
-                return "Please type the number as digits only, with no spaces, dashes or letters.";
-            return wallet::CardWallet::normalizeNumber(s)
-                       ? "" : "That card number does not look right. Check the digits (12 to 19 numbers).";
-        });
-    done = done && askValid("Expiry date, as MM/YY (for example 08/28):", expiry, false,
-        [](const std::string& s) -> std::string {
-            return wallet::CardWallet::normalizeExpiry(s) ? "" : "Please use MM/YY, for example 08/28.";
-        });
-
-    if (done) {
-        guarded([&] {
-            switch (cards.add(label, holder, number, expiry)) {
-                case wallet::AddResult::Added: showMessage("Card saved."); break;
-                case wallet::AddResult::Full:
-                    showMessage("The wallet is full (" + std::to_string(wallet::CardWallet::kMaxCards) +
-                                " cards). Remove a card first.");
-                    break;
-                default: showMessage("That card could not be added. Please check what you entered."); break;
-            }
-        });
-    }
-    wipe(number);
+    addCardForm([&](const std::string& label, const std::string& holder,
+                   const std::string& number, const std::string& expiry) -> CardFormError {
+        if (!wallet::CardWallet::validLabel(label)) return {0, "Use 1–40 characters, without leading or trailing spaces."};
+        if (!wallet::CardWallet::validHolder(holder)) return {1, "Use at most 64 characters."};
+        if (!wallet::CardWallet::normalizeNumber(number)) return {2, "Check the card number: use 12–19 digits and a valid card checksum."};
+        if (!wallet::CardWallet::normalizeExpiry(expiry)) return {3, "Enter a valid expiration date as MM/YY."};
+        switch (cards.add(label, holder, number, expiry)) {
+            case wallet::AddResult::Added: return {};
+            case wallet::AddResult::DuplicateLabel: return {0, "A card with this name already exists. Choose a different Card Name."};
+            case wallet::AddResult::Full: return {0, "The wallet is full. Remove a card first."};
+            default: return {0, "Could not add this card. Check whether its name is already in use."};
+        }
+    });
 }
 
 void viewCards(wallet::CardWallet& cards) {

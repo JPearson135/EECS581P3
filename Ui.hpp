@@ -6,13 +6,18 @@
 #include <vector>
 
 namespace ui {
+struct CardFormError { int field = 0; std::string message; };
+using CardSubmit = std::function<CardFormError(const std::string&, const std::string&, const std::string&, const std::string&)>;
+std::string expiryProblem(const std::string& expiry);
+void addCardForm(const CardSubmit& submit);
 void init();
 void showMessage(const std::string& text);
 void showSecret(const std::string& description, const std::string& secret);
 void notImplemented(const std::string& feature);
 bool confirm(const std::string& question);
 bool askText(const std::string& prompt, std::string& out, const std::string& initial = "");
-bool askHidden(const std::string& prompt, std::string& out, bool allowReveal = true);
+bool askExpiry(const std::string& prompt, std::string& out);
+bool askHidden(const std::string& prompt, std::string& out, bool allowReveal = true, bool cardNumber = false);
 class Menu {
 public:
     using Action = std::function<void()>;
