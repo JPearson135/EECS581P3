@@ -36,7 +36,7 @@ Fl_Color accentColor()  { return rgb(200, 162, 106); }
 
 const int kWinW = 980, kWinH = 640, kHeaderH = 80, kMargin = 56;
 
-// Use the limiting dimension so text stays within the resized layout.
+// scale text with the smaller window dimension so it still fits
 int scaledText(const Fl_Widget& widget, int base) {
     const Fl_Window* window = widget.window();
     if (!window || !window->resizable()) return base;
@@ -132,7 +132,7 @@ private:
     bool hovering_ = false;
 };
 
-// Borderless eye button; retain normal keyboard navigation.
+// shared eye button for showing and hiding sensitive text
 class EyeButton : public Fl_Button {
 public:
     EyeButton(int x, int y, int w, int h) : Fl_Button(x, y, w, h) {}
@@ -141,6 +141,7 @@ public:
     void draw() override {
         fl_color(color());
         fl_rectf(x(), y(), w(), h());
+        // continue the focused underline beneath the eye
         if (insideField) {
             fl_color(surfaceColor());
             fl_rectf(x(), y() + 5, w(), h() - 10);
@@ -232,6 +233,7 @@ private:
 template <class Base>
 class Field : public Base {
 public:
+    // keep embedded icons visible when the input repaints
     EyeButton* embeddedEye = nullptr;
     Field(int x, int y, int w, int h) : Base(x, y, w, h) {
         this->box(FL_FLAT_BOX);
@@ -256,6 +258,7 @@ public:
     }
 };
 
+// group card digits without saving the display spaces
 class CardNumberField : public Field<Fl_Secret_Input> {
 public:
     EyeButton* eye = nullptr;
@@ -265,7 +268,7 @@ public:
         if (type() != FL_SECRET_INPUT || !value()[0]) {
             Field<Fl_Secret_Input>::draw();
         } else {
-            // Draw the mask ourselves: separators are gaps, never secret-input dots.
+            // draw the mask ourselves: separators are gaps, never secret-input dots.
             fl_color(color());
             fl_rectf(x(), y(), w(), h());
             fl_color(Fl::focus() == this ? accentColor() : mutedColor());
@@ -292,8 +295,8 @@ public:
             }
             fl_pop_clip();
         }
-        // A visual hint only: never part of the input value or saved card number.
-        // Keep it visible while focused until the user enters a character.
+        // a visual hint only: never part of the input value or saved card number.
+        // keep it visible while focused until the user enters a character.
         if (!value()[0]) {
             fl_push_clip(x() + 3, y() + 1, w() - 6, h() - 3);
             fl_font(textfont(), textsize());
@@ -302,7 +305,7 @@ public:
                     FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
             fl_pop_clip();
         }
-        // The eye overlaps the field: repaint it after every input redraw.
+        // the eye overlaps the field: repaint it after every input redraw.
         if (eye) eye->draw();
     }
     int handle(int event) override {
@@ -328,8 +331,8 @@ public:
             formatted += digits[i];
             if (static_cast<int>(i) < before) newCursor = static_cast<int>(formatted.size());
         }
-        // Advance across the separator as soon as a four-digit group is complete.
-        // Do not reinsert it while the user is deleting or moving the cursor.
+        // advance across the separator as soon as a four-digit group is complete.
+        // do not reinsert it while the user is deleting or moving the cursor.
         const bool inserting = event == FL_PASTE ||
             (event == FL_KEYBOARD && Fl::event_length() > 0 &&
              Fl::event_key() != FL_BackSpace && Fl::event_key() != FL_Delete);
@@ -347,6 +350,7 @@ public:
     }
 };
 
+// add the expiry slash while the user types
 class ExpiryField : public Field<Fl_Input> {
 public:
     std::function<void()> onBlur, onEdit;
@@ -450,8 +454,8 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
             const std::string& initial = "", bool allowReveal = false, bool readOnly = false, bool cardNumber = false, bool expiry = false) {
     Fl_PNG_Image hiddenImage("hidden", hiddenIcon, sizeof(hiddenIcon));
     Fl_PNG_Image visibleImage("visible", visibleIcon, sizeof(visibleIcon));
-    // Keep four physical pixels per logical pixel for crisp Retina rendering.
-    // The open-eye artwork has more transparent padding, so compensate optically.
+    // keep four physical pixels per logical pixel for crisp retina rendering.
+    // the open-eye artwork has more transparent padding, so compensate optically.
     Fl_Image::RGB_scaling(FL_RGB_SCALING_BILINEAR);
     Fl_Image::scaling_algorithm(FL_RGB_SCALING_BILINEAR);
     std::unique_ptr<Fl_Image> hiddenDisplay(hiddenImage.copy(96, 96));
@@ -584,6 +588,7 @@ void runDialog(const Menu& menu) {
 
 }
 
+// expired dates warn without blocking saves; invalid dates still fail
 std::string expiryProblem(const std::string& expiry) {
     if (!wallet::CardWallet::normalizeExpiry(expiry)) return "Enter a valid expiration date as MM/YY.";
     const std::time_t now = std::time(nullptr);
@@ -594,6 +599,7 @@ std::string expiryProblem(const std::string& expiry) {
     return "";
 }
 
+// keep card entry and field errors together in one form
 void addCardForm(const CardSubmit& submit) {
     Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
     Fl_PNG_Image visibleSource("visible", visibleIcon, sizeof(visibleIcon));
@@ -609,6 +615,7 @@ void addCardForm(const CardSubmit& submit) {
     dialog.set_modal();
     new Text(40, 28, 460, 36, "Add card", 28, textColor());
     const char* labels[] = {"Card Name", "Name on Card (optional)", "Card Number", "Expiration Date"};
+    // show the warning beside its field and the explanation below it
     Fl_PNG_Image warningSource("warning", warningIcon, sizeof(warningIcon));
     std::unique_ptr<Fl_Image> warning(warningSource.copy(96, 96));
     warning->scale(24, 24);
@@ -652,6 +659,7 @@ void addCardForm(const CardSubmit& submit) {
         for (volatile char* p = number.empty() ? nullptr : &number[0]; p && p < &number[0] + number.size(); ++p) *p = 0;
         return valid;
     };
+    // check after leaving the field and clear the warning when corrected
     numberInput->onBlur = [&] {
         const bool valid = numberValid();
         errors[2]->copy_label(valid ? "" : "Check the card number: use 12–19 digits and a valid card checksum.");
@@ -666,6 +674,7 @@ void addCardForm(const CardSubmit& submit) {
         }
     };
     auto* expiryInput = static_cast<ExpiryField*>(fields[3]);
+    // check the expiry when focus leaves and clear corrected warnings
     auto validateExpiry = [&] {
         const std::string problem = expiryProblem(fields[3]->value());
         errors[3]->copy_label(problem.c_str());
@@ -704,6 +713,7 @@ void addCardForm(const CardSubmit& submit) {
     fields[2]->value("");
 }
 
+// first-time setup with both password fields on the same screen
 bool createPasswordScreen(const std::string& rules,
         const std::function<std::string(const std::string&, const std::string&)>& submit) {
     Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
@@ -718,6 +728,7 @@ bool createPasswordScreen(const std::string& rules,
     new Dot(56, 38);
     new Text(74, 28, 360, 24, "DIGIWALLET", 12, textColor(), 4, FL_HELVETICA_BOLD);
     new Line(0, 80, kWinW);
+    // line up the welcome text with the password fields
     new Text(100, 110, 780, 52, "Welcome to DigiWallet", 36, textColor());
     new Text(100, 173, 780, 32, "Create a master password to get started.", 17, mutedColor());
     (void)rules;
@@ -726,6 +737,7 @@ bool createPasswordScreen(const std::string& rules,
     std::unique_ptr<Fl_Image> check(checkSource.copy(96, 96));
     std::unique_ptr<Fl_Image> cross(crossSource.copy(96, 96));
     check->scale(24, 24); cross->scale(24, 24);
+    // keep each requirement visible and mark completed ones in gold
     const char* requirements[] = {"At least 16 characters", "One uppercase letter (A–Z)",
         "One lowercase letter (a–z)", "One symbol or space", "At most 1024 bytes", "Passwords match"};
     Fl_Box* indicators[6];
@@ -764,6 +776,7 @@ bool createPasswordScreen(const std::string& rules,
             screen.redraw();
         }));
     }
+    // update the checks and label colors as the password changes
     auto updateRequirements = [&] {
         const std::string_view password(fields[0]->value());
         bool upper = false, lower = false, symbol = false;
@@ -799,6 +812,7 @@ bool createPasswordScreen(const std::string& rules,
             screen.hide();
         } else { error->copy_label(problem.c_str()); error->redraw(); }
     };
+    // align setup actions with the left input edge and right eye edge
     auto* cancel = new LinkButton(100, 556, 90, 30, "Cancel", false);
     cancel->callback(trampoline, bindings.add([&] { screen.hide(); }));
     auto* create = new LinkButton(310, 556, 210, 30, "Create master password", true);
@@ -812,6 +826,7 @@ bool createPasswordScreen(const std::string& rules,
     return created;
 }
 
+// returning login and lock-now use the same screen
 bool unlockScreen(const std::function<bool(const std::string&)>& unlock) {
     Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
     Fl_PNG_Image visibleSource("visible", visibleIcon, sizeof(visibleIcon));
@@ -847,6 +862,7 @@ bool unlockScreen(const std::function<bool(const std::string&)>& unlock) {
     auto* close = new LinkButton(180, 510, 90, 30, "Cancel", false);
     close->callback(trampoline, bindings.add([&] { screen.hide(); }));
     auto* button = new LinkButton(650, 510, 150, 30, "Unlock", true);
+    // keep the five-attempt limit and show errors within the login screen
     int attempts = 0;
     bool unlocked = false;
     auto submit = [&] {
@@ -885,6 +901,7 @@ void init() {
 
 void showMessage(const std::string& text) { prompt(Kind::Message, text, nullptr); }
 
+// show saved sensitive values read-only with the same eye toggle
 void showSecret(const std::string& description, const std::string& secret) {
     prompt(Kind::Hidden, description, nullptr, secret, true, true);
 }
@@ -909,6 +926,7 @@ bool askExpiry(const std::string& promptText, std::string& out) {
     return true;
 }
 
+// reuse hidden input and visibility controls for sensitive entry
 bool askHidden(const std::string& promptText, std::string& out, bool allowReveal, bool cardNumber) {
     std::string answer;
     if (!prompt(Kind::Hidden, promptText, &answer, "", allowReveal, false, cardNumber)) return false;
@@ -1055,7 +1073,7 @@ void Menu::run() const {
     }
 
     window.end();
-    // Let FLTK grow the page layout and enable the native resize/fullscreen controls.
+    // allow resizing and native fullscreen while keeping the minimum usable size
     window.resizable(window);
     window.size_range(kWinW, kWinH);
     showPage(0);

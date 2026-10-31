@@ -100,6 +100,7 @@ std::optional<std::string> pickCard(const wallet::CardWallet& cards, const std::
     return chosen;
 }
 
+// validate the combined form before saving and report errors beside the right field
 void addCard(wallet::CardWallet& cards) {
     if (!ready(cards)) return;
     addCardForm([&](const std::string& label, const std::string& holder,
@@ -110,6 +111,7 @@ void addCard(wallet::CardWallet& cards) {
         if (!wallet::CardWallet::normalizeExpiry(expiry)) return {3, "Enter a valid expiration date as MM/YY."};
         switch (cards.add(label, holder, number, expiry)) {
             case wallet::AddResult::Added: return {};
+            // explain duplicate names instead of showing a generic save error
             case wallet::AddResult::DuplicateLabel: return {0, "A card with this name already exists. Choose a different Card Name."};
             case wallet::AddResult::Full: return {0, "The wallet is full. Remove a card first."};
             default: return {0, "Could not add this card. Check whether its name is already in use."};
@@ -130,6 +132,7 @@ void viewCards(wallet::CardWallet& cards) {
 
         const auto number = cards.revealNumber(*label);
         if (!number) return;
+        // reveal saved card numbers only through the visibility toggle
         showSecret(*label + " — Card number", std::string(number->view()));
     });
 }

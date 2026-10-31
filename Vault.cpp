@@ -34,6 +34,7 @@ const char* const kRules =
     "Use at least 16 characters, including 1 uppercase letter, 1 lowercase letter, "
     "and 1 non-alphanumeric character.";
 
+// combine welcome, password rules, and confirmation in one setup screen
 bool createFlow(KeyManager& keys) {
     return ui::createPasswordScreen(kRules, [&](const std::string& password,
                                                const std::string& confirmation) -> std::string {
@@ -44,6 +45,7 @@ bool createFlow(KeyManager& keys) {
     });
 }
 
+// use the full login screen for returning users and after locking
 bool unlockFlow(KeyManager& keys) {
     return ui::unlockScreen([&](const std::string& password) { return keys.unlock(password); });
 }

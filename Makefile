@@ -71,6 +71,7 @@ run: build
 ifeq ($(PLATFORM),Darwin)
 app: build
 	mkdir -p $(APP_NAME).app/Contents/MacOS
+	# replace the executable instead of overwriting the running copy
 	cp $(TARGET) $(APP_NAME).app/Contents/MacOS/$(APP_NAME).new
 	mv -f $(APP_NAME).app/Contents/MacOS/$(APP_NAME).new $(APP_NAME).app/Contents/MacOS/$(APP_NAME)
 	printf '%s\n' \
@@ -84,6 +85,7 @@ app: build
 	  '<key>CFBundleVersion</key><string>1.0</string>' \
 	  '<key>NSHighResolutionCapable</key><true/>' \
 	  '</dict></plist>' > $(APP_NAME).app/Contents/Info.plist
+	# refresh the local signature so macos accepts the rebuilt app
 	codesign --force --sign - $(APP_NAME).app
 	@echo "Built $(APP_NAME).app: double-click it in Finder."
 else
