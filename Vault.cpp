@@ -17,14 +17,17 @@ bool validMasterPassword(const std::string& password) {
     bool upper = false, lower = false, special = false;
     std::size_t characters = 0;
     for (unsigned char c : password) {
+        // reject spaces and other ascii whitespace in new passwords
+        if (c == ' ' || (c >= 9 && c <= 13)) return false;
         // Count UTF-8 characters rather than their individual bytes.
         if ((c & 0xC0) != 0x80) ++characters;
         upper |= c >= 'A' && c <= 'Z';
         lower |= c >= 'a' && c <= 'z';
-        // ASCII non-alphanumeric characters (including spaces) satisfy the rule.
+        // require a symbol in addition to uppercase and lowercase letters
         special |= c < 128 && !((c >= 'A' && c <= 'Z') ||
             (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'));
     }
+    // keep the size limit enforced even though it is not listed in the checklist
     return characters >= 16 && password.size() <= 1024 && upper && lower && special;
 }
 
@@ -32,7 +35,7 @@ namespace {
 // Shared explanation shown whenever the user must create a compliant password.
 const char* const kRules =
     "Use at least 16 characters, including 1 uppercase letter, 1 lowercase letter, "
-    "and 1 non-alphanumeric character.";
+    "and 1 symbol. Spaces are not allowed.";
 
 // combine welcome, password rules, and confirmation in one setup screen
 bool createFlow(KeyManager& keys) {

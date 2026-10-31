@@ -738,12 +738,13 @@ bool createPasswordScreen(const std::string& rules,
     std::unique_ptr<Fl_Image> cross(crossSource.copy(96, 96));
     check->scale(24, 24); cross->scale(24, 24);
     // keep each requirement visible and mark completed ones in gold
+    // show the main requirements here; whitespace and size limits are checked on submit
     const char* requirements[] = {"At least 16 characters", "One uppercase letter (A–Z)",
-        "One lowercase letter (a–z)", "One symbol or space", "At most 1024 bytes", "Passwords match"};
-    Fl_Box* indicators[6];
-    Fl_Box* requirementLabels[6];
+        "One lowercase letter (a–z)", "One symbol", "Passwords match"};
+    Fl_Box* indicators[5];
+    Fl_Box* requirementLabels[5];
     new Text(570, 246, 340, 24, "PASSWORD REQUIREMENTS", 12, mutedColor(), 1);
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 5; ++i) {
         indicators[i] = new Fl_Box(570, 282 + i * 32, 24, 24);
         indicators[i]->box(FL_FLAT_BOX);
         indicators[i]->color(bgColor());
@@ -785,12 +786,11 @@ bool createPasswordScreen(const std::string& rules,
             if ((c & 0xC0) != 0x80) ++count;
             upper |= c >= 'A' && c <= 'Z';
             lower |= c >= 'a' && c <= 'z';
-            symbol |= c < 128 && !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'));
+            symbol |= c > 32 && c < 127 && !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'));
         }
         bool met[] = {count >= 16, upper, lower, symbol,
-            !password.empty() && password.size() <= 1024,
             !password.empty() && password == fields[1]->value()};
-        for (int i = 0; i < 6; ++i) {
+        for (int i = 0; i < 5; ++i) {
             indicators[i]->image(met[i] ? check.get() : cross.get());
             requirementLabels[i]->labelcolor(met[i] ? accentColor() : mutedColor());
             indicators[i]->redraw();

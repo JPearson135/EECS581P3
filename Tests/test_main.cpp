@@ -5,6 +5,8 @@
 #include <string>
 void require(bool condition) { if (!condition) throw std::runtime_error("Test failed"); }
 int main() {
+    require(!security::validMasterPassword("Abcdefghijklmn! "));
+    require(!security::validMasterPassword("Abcdefghijklmn!\t"));
     require(security::validMasterPassword("Abcdefghijklmno!"));    // exactly 16; no digit required
     require(!security::validMasterPassword("Abcdefghijklmn!"));    // 15 characters
     require(!security::validMasterPassword("abcdefghijklmnop!"));  // missing uppercase
