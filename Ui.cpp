@@ -718,8 +718,8 @@ bool createPasswordScreen(const std::string& rules,
     new Dot(56, 38);
     new Text(74, 28, 360, 24, "DIGIWALLET", 12, textColor(), 4, FL_HELVETICA_BOLD);
     new Line(0, 80, kWinW);
-    new Text(180, 110, 620, 52, "Welcome to DigiWallet", 36, textColor());
-    new Text(180, 173, 620, 32, "Create a master password to get started.", 17, mutedColor());
+    new Text(100, 110, 780, 52, "Welcome to DigiWallet", 36, textColor());
+    new Text(100, 173, 780, 32, "Create a master password to get started.", 17, mutedColor());
     (void)rules;
     Fl_PNG_Image checkSource("check", checkIcon, sizeof(checkIcon));
     Fl_PNG_Image crossSource("cross", crossIcon, sizeof(crossIcon));
