@@ -35,42 +35,19 @@ const char* const kRules =
     "and 1 non-alphanumeric character.";
 
 bool createFlow(KeyManager& keys) {
-    ui::showMessage(std::string("Welcome to DigiWallet. Create a master password to get started.\n\n") +
-                    kRules);
-    while (true) {
-        Secret password, confirmation;
-        // Leaving either prompt cancels setup rather than creating a partial record.
-        if (!ui::askHidden("Create master password:", password.value)) return false;
-        if (!validMasterPassword(password.value)) {
-            ui::showMessage(kRules);
-            continue;
-        }
-        if (!ui::askHidden("Confirm master password:", confirmation.value)) return false;
-        if (password.value != confirmation.value) {
-            ui::showMessage("The passwords do not match. Please try again.");
-            continue;
-        }
-        // Takes about half a second on purpose (the key recipe is slow). The vault is unlocked afterwards.
-        keys.createVault(password.value);
-        ui::showMessage("Master password created successfully.");
-        return true;
-    }
+    return ui::createPasswordScreen(kRules, [&](const std::string& password,
+                                               const std::string& confirmation) -> std::string {
+        if (!validMasterPassword(password)) return kRules;
+        if (password != confirmation) return "The passwords do not match. Please try again.";
+        keys.createVault(password);
+        return "";
+    });
 }
 
 bool unlockFlow(KeyManager& keys) {
-    const int maxAttempts = 5;
-    for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
-        Secret password;
-        // Limit failed attempts to reduce password-guessing opportunities.
-        if (!ui::askHidden("Enter your master password to unlock DigiWallet.", password.value))
-            return false;
-        // One plain "no" covers a wrong password, a missing vault file and a changed vault file.
-        if (keys.unlock(password.value)) return true;
-        if (attempt < maxAttempts) ui::showMessage("Incorrect master password. Please try again.");
-    }
-    ui::showMessage("Too many incorrect attempts. DigiWallet will now close.");
-    return false;
+    return ui::unlockScreen([&](const std::string& password) { return keys.unlock(password); });
 }
+
 }
 bool unlockVault(KeyManager& keys) {
     try {

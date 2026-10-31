@@ -3,6 +3,7 @@
 #include "Ui.hpp"
 #include "Wallet.hpp"
 #include <ctime>
+#include <openssl/crypto.h>
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Button.H>
@@ -371,6 +372,17 @@ public:
     }
 };
 
+class LiveSecretField : public Field<Fl_Secret_Input> {
+public:
+    using Field<Fl_Secret_Input>::Field;
+    std::function<void()> onEdit;
+    int handle(int event) override {
+        int used = Field<Fl_Secret_Input>::handle(event);
+        if ((event == FL_KEYBOARD || event == FL_PASTE) && onEdit) onEdit();
+        return used;
+    }
+};
+
 struct Binding {
     std::function<void()> fn;
 };
@@ -671,6 +683,173 @@ void addCardForm(const CardSubmit& submit) {
     fields[0]->take_focus();
     while (dialog.shown()) Fl::wait();
     fields[2]->value("");
+}
+
+bool createPasswordScreen(const std::string& rules,
+        const std::function<std::string(const std::string&, const std::string&)>& submit) {
+    Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
+    Fl_PNG_Image visibleSource("visible", visibleIcon, sizeof(visibleIcon));
+    Fl_Image::RGB_scaling(FL_RGB_SCALING_BILINEAR);
+    std::unique_ptr<Fl_Image> hidden(hiddenSource.copy(96, 96));
+    std::unique_ptr<Fl_Image> visible(visibleSource.copy(104, 104));
+    hidden->scale(24, 24); visible->scale(26, 26);
+    BindingList bindings;
+    Fl_Double_Window screen(kWinW, kWinH, "DigiWallet");
+    screen.color(bgColor());
+    new Dot(56, 38);
+    new Text(74, 28, 360, 24, "DIGIWALLET", 12, textColor(), 4, FL_HELVETICA_BOLD);
+    new Line(0, 80, kWinW);
+    new Text(180, 110, 620, 52, "Welcome to DigiWallet", 36, textColor());
+    new Text(180, 173, 620, 32, "Create a master password to get started.", 17, mutedColor());
+    (void)rules;
+    Fl_PNG_Image checkSource("check", checkIcon, sizeof(checkIcon));
+    Fl_PNG_Image crossSource("cross", crossIcon, sizeof(crossIcon));
+    std::unique_ptr<Fl_Image> check(checkSource.copy(96, 96));
+    std::unique_ptr<Fl_Image> cross(crossSource.copy(96, 96));
+    check->scale(24, 24); cross->scale(24, 24);
+    const char* requirements[] = {"At least 16 characters", "One uppercase letter (A–Z)",
+        "One lowercase letter (a–z)", "One symbol or space", "At most 1024 bytes", "Passwords match"};
+    Fl_Box* indicators[6];
+    Fl_Box* requirementLabels[6];
+    new Text(570, 246, 340, 24, "PASSWORD REQUIREMENTS", 12, mutedColor(), 1);
+    for (int i = 0; i < 6; ++i) {
+        indicators[i] = new Fl_Box(570, 282 + i * 32, 24, 24);
+        indicators[i]->box(FL_FLAT_BOX);
+        indicators[i]->color(bgColor());
+        indicators[i]->image(cross.get());
+        requirementLabels[i] = new Fl_Box(608, 282 + i * 32, 310, 26);
+        requirementLabels[i]->box(FL_FLAT_BOX);
+        requirementLabels[i]->color(bgColor());
+        requirementLabels[i]->copy_label(requirements[i]);
+        requirementLabels[i]->labelsize(14);
+        requirementLabels[i]->labelcolor(mutedColor());
+        requirementLabels[i]->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
+    }
+    Fl_Input* fields[2];
+    for (int i = 0; i < 2; ++i) {
+        int y = 276 + i * 100;
+        new Text(100, y, 420, 24, i ? "Confirm master password" : "Master password", 15, mutedColor());
+        fields[i] = new LiveSecretField(100, y + 30, 368, 34);
+        auto* eye = new EyeButton(476, y + 25, 44, 44);
+        eye->color(bgColor()); eye->image(visible.get());
+        eye->tooltip("Show password");
+        Fl_Input* field = fields[i];
+        eye->callback(trampoline, bindings.add([&, eye, field] {
+            bool reveal = field->type() == FL_SECRET_INPUT;
+            field->type(reveal ? FL_NORMAL_INPUT : FL_SECRET_INPUT);
+            eye->image(reveal ? hidden.get() : visible.get());
+            eye->tooltip(reveal ? "Hide password" : "Show password");
+            screen.redraw();
+        }));
+    }
+    auto updateRequirements = [&] {
+        const std::string_view password(fields[0]->value());
+        bool upper = false, lower = false, symbol = false;
+        std::size_t count = 0;
+        for (unsigned char c : password) {
+            if ((c & 0xC0) != 0x80) ++count;
+            upper |= c >= 'A' && c <= 'Z';
+            lower |= c >= 'a' && c <= 'z';
+            symbol |= c < 128 && !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'));
+        }
+        bool met[] = {count >= 16, upper, lower, symbol,
+            !password.empty() && password.size() <= 1024,
+            !password.empty() && password == fields[1]->value()};
+        for (int i = 0; i < 6; ++i) {
+            indicators[i]->image(met[i] ? check.get() : cross.get());
+            requirementLabels[i]->labelcolor(met[i] ? accentColor() : mutedColor());
+            indicators[i]->redraw();
+            requirementLabels[i]->redraw();
+        }
+    };
+    for (auto* field : fields) static_cast<LiveSecretField*>(field)->onEdit = updateRequirements;
+    auto* error = new Fl_Box(100, 477, 780, 54);
+    error->labelsize(14); error->labelcolor(accentColor());
+    error->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE | FL_ALIGN_WRAP);
+    bool created = false;
+    auto save = [&] {
+        std::string problem;
+        try { problem = submit(fields[0]->value(), fields[1]->value()); }
+        catch (const std::exception&) { problem = "Could not create the vault. Please try again."; }
+        if (problem.empty()) {
+            created = true;
+            for (auto* field : fields) field->value("");
+            screen.hide();
+        } else { error->copy_label(problem.c_str()); error->redraw(); }
+    };
+    auto* cancel = new LinkButton(180, 556, 90, 30, "Cancel", false);
+    cancel->callback(trampoline, bindings.add([&] { screen.hide(); }));
+    auto* create = new LinkButton(590, 556, 210, 30, "Create master password", true);
+    create->callback(trampoline, bindings.add(save));
+    fields[0]->callback(trampoline, bindings.add([&] { fields[1]->take_focus(); }));
+    fields[1]->callback(trampoline, bindings.add(save));
+    screen.end();
+    centre(screen); screen.show(); fields[0]->take_focus();
+    while (screen.shown()) Fl::wait();
+    for (auto* field : fields) field->value("");
+    return created;
+}
+
+bool unlockScreen(const std::function<bool(const std::string&)>& unlock) {
+    Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
+    Fl_PNG_Image visibleSource("visible", visibleIcon, sizeof(visibleIcon));
+    Fl_Image::RGB_scaling(FL_RGB_SCALING_BILINEAR);
+    std::unique_ptr<Fl_Image> hidden(hiddenSource.copy(96, 96));
+    std::unique_ptr<Fl_Image> visible(visibleSource.copy(104, 104));
+    hidden->scale(24, 24); visible->scale(26, 26);
+    BindingList bindings;
+    Fl_Double_Window screen(kWinW, kWinH, "DigiWallet");
+    screen.color(bgColor());
+    new Dot(56, 38);
+    new Text(74, 28, 360, 24, "DIGIWALLET", 12, textColor(), 4, FL_HELVETICA_BOLD);
+    new Line(0, 80, kWinW);
+    new Text(180, 145, 620, 54, "Welcome back", 36, textColor());
+    new Text(180, 212, 620, 48, "Enter your master password to unlock DigiWallet.", 17, mutedColor());
+    new Text(180, 300, 620, 24, "Master password", 15, mutedColor());
+    auto* field = new Field<Fl_Secret_Input>(180, 336, 568, 34);
+    auto* eye = new EyeButton(756, 331, 44, 44);
+    eye->color(bgColor()); eye->image(visible.get()); eye->tooltip("Show password");
+    eye->callback(trampoline, bindings.add([&] {
+        const bool reveal = field->type() == FL_SECRET_INPUT;
+        field->type(reveal ? FL_NORMAL_INPUT : FL_SECRET_INPUT);
+        eye->image(reveal ? hidden.get() : visible.get());
+        eye->tooltip(reveal ? "Hide password" : "Show password");
+        screen.redraw();
+    }));
+    auto* error = new Fl_Box(180, 398, 620, 64);
+    error->labelsize(14); error->labelcolor(accentColor());
+    error->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE | FL_ALIGN_WRAP);
+    auto* close = new LinkButton(180, 510, 90, 30, "Cancel", false);
+    close->callback(trampoline, bindings.add([&] { screen.hide(); }));
+    auto* button = new LinkButton(650, 510, 150, 30, "Unlock", true);
+    int attempts = 0;
+    bool unlocked = false;
+    auto submit = [&] {
+        if (attempts >= 5) return;
+        std::string password = field->value();
+        ++attempts;
+        bool accepted = false;
+        try { accepted = unlock(password); } catch (const std::exception&) {}
+        if (!password.empty()) OPENSSL_cleanse(password.data(), password.size());
+        field->value("");
+        field->type(FL_SECRET_INPUT); eye->image(visible.get()); eye->tooltip("Show password");
+        if (accepted) { unlocked = true; screen.hide(); return; }
+        if (attempts >= 5) {
+            error->copy_label("Too many incorrect attempts. Close DigiWallet and try again.");
+            field->deactivate(); eye->deactivate(); button->deactivate();
+            close->copy_label("Close"); close->take_focus();
+        } else {
+            const std::string message = "Incorrect master password. " + std::to_string(5 - attempts) + " attempts remaining.";
+            error->copy_label(message.c_str()); field->take_focus();
+        }
+        screen.redraw();
+    };
+    button->callback(trampoline, bindings.add(submit));
+    field->callback(trampoline, bindings.add(submit));
+    screen.end(); centre(screen); screen.show(); field->take_focus();
+    while (screen.shown()) Fl::wait();
+    field->value("");
+    return unlocked;
 }
 
 void init() {
