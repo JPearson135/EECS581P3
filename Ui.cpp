@@ -36,6 +36,21 @@ Fl_Color accentColor()  { return rgb(200, 162, 106); }
 
 const int kWinW = 980, kWinH = 640, kHeaderH = 80, kMargin = 56;
 
+// Makes an icon that is shown at backing/4 logical pixels. FLTK 1.4 keeps the larger
+// picture and scales it down when drawing (sharp on retina screens). FLTK 1.3 (Ubuntu/WSL)
+// has no scale(), so there the picture is simply made at the shown size.
+std::unique_ptr<Fl_Image> makeIcon(Fl_Image& source, int backing) {
+    Fl_Image::RGB_scaling(FL_RGB_SCALING_BILINEAR);
+#if FL_API_VERSION >= 10400
+    Fl_Image::scaling_algorithm(FL_RGB_SCALING_BILINEAR);
+    std::unique_ptr<Fl_Image> icon(source.copy(backing, backing));
+    icon->scale(backing / 4, backing / 4);
+    return icon;
+#else
+    return std::unique_ptr<Fl_Image>(source.copy(backing / 4, backing / 4));
+#endif
+}
+
 // scale text with the smaller window dimension so it still fits
 int scaledText(const Fl_Widget& widget, int base) {
     const Fl_Window* window = widget.window();
@@ -456,12 +471,8 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
     Fl_PNG_Image visibleImage("visible", visibleIcon, sizeof(visibleIcon));
     // keep four physical pixels per logical pixel for crisp retina rendering.
     // the open-eye artwork has more transparent padding, so compensate optically.
-    Fl_Image::RGB_scaling(FL_RGB_SCALING_BILINEAR);
-    Fl_Image::scaling_algorithm(FL_RGB_SCALING_BILINEAR);
-    std::unique_ptr<Fl_Image> hiddenDisplay(hiddenImage.copy(96, 96));
-    std::unique_ptr<Fl_Image> visibleDisplay(visibleImage.copy(104, 104));
-    hiddenDisplay->scale(24, 24);
-    visibleDisplay->scale(26, 26);
+    std::unique_ptr<Fl_Image> hiddenDisplay = makeIcon(hiddenImage, 96);
+    std::unique_ptr<Fl_Image> visibleDisplay = makeIcon(visibleImage, 104);
     const int width = 480, pad = 40, inner = width - 2 * pad;
     const int messageH = textHeight(message, inner, 15);
     const bool input = kind == Kind::Text || kind == Kind::Hidden;
@@ -603,11 +614,8 @@ std::string expiryProblem(const std::string& expiry) {
 void addCardForm(const CardSubmit& submit) {
     Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
     Fl_PNG_Image visibleSource("visible", visibleIcon, sizeof(visibleIcon));
-    Fl_Image::RGB_scaling(FL_RGB_SCALING_BILINEAR);
-    std::unique_ptr<Fl_Image> hidden(hiddenSource.copy(96, 96));
-    std::unique_ptr<Fl_Image> visible(visibleSource.copy(104, 104));
-    hidden->scale(24, 24);
-    visible->scale(26, 26);
+    std::unique_ptr<Fl_Image> hidden = makeIcon(hiddenSource, 96);
+    std::unique_ptr<Fl_Image> visible = makeIcon(visibleSource, 104);
     BindingList bindings;
     DialogWindow dialog(540, 660);
     dialog.copy_label("Add card");
@@ -617,8 +625,7 @@ void addCardForm(const CardSubmit& submit) {
     const char* labels[] = {"Card Name", "Name on Card (optional)", "Card Number", "Expiration Date"};
     // show the warning beside its field and the explanation below it
     Fl_PNG_Image warningSource("warning", warningIcon, sizeof(warningIcon));
-    std::unique_ptr<Fl_Image> warning(warningSource.copy(96, 96));
-    warning->scale(24, 24);
+    std::unique_ptr<Fl_Image> warning = makeIcon(warningSource, 96);
     Fl_Input* fields[4];
     Fl_Box* errors[4];
     Fl_Box* warnings[4];
@@ -718,10 +725,8 @@ bool createPasswordScreen(const std::string& rules,
         const std::function<std::string(const std::string&, const std::string&)>& submit) {
     Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
     Fl_PNG_Image visibleSource("visible", visibleIcon, sizeof(visibleIcon));
-    Fl_Image::RGB_scaling(FL_RGB_SCALING_BILINEAR);
-    std::unique_ptr<Fl_Image> hidden(hiddenSource.copy(96, 96));
-    std::unique_ptr<Fl_Image> visible(visibleSource.copy(104, 104));
-    hidden->scale(24, 24); visible->scale(26, 26);
+    std::unique_ptr<Fl_Image> hidden = makeIcon(hiddenSource, 96);
+    std::unique_ptr<Fl_Image> visible = makeIcon(visibleSource, 104);
     BindingList bindings;
     Fl_Double_Window screen(kWinW, kWinH, "DigiWallet");
     screen.color(bgColor());
@@ -734,9 +739,8 @@ bool createPasswordScreen(const std::string& rules,
     (void)rules;
     Fl_PNG_Image checkSource("check", checkIcon, sizeof(checkIcon));
     Fl_PNG_Image crossSource("cross", crossIcon, sizeof(crossIcon));
-    std::unique_ptr<Fl_Image> check(checkSource.copy(96, 96));
-    std::unique_ptr<Fl_Image> cross(crossSource.copy(96, 96));
-    check->scale(24, 24); cross->scale(24, 24);
+    std::unique_ptr<Fl_Image> check = makeIcon(checkSource, 96);
+    std::unique_ptr<Fl_Image> cross = makeIcon(crossSource, 96);
     // keep each requirement visible and mark completed ones in gold
     // show the main requirements here; whitespace and size limits are checked on submit
     const char* requirements[] = {"At least 16 characters", "One uppercase letter (A–Z)",
@@ -830,10 +834,8 @@ bool createPasswordScreen(const std::string& rules,
 bool unlockScreen(const std::function<bool(const std::string&)>& unlock) {
     Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
     Fl_PNG_Image visibleSource("visible", visibleIcon, sizeof(visibleIcon));
-    Fl_Image::RGB_scaling(FL_RGB_SCALING_BILINEAR);
-    std::unique_ptr<Fl_Image> hidden(hiddenSource.copy(96, 96));
-    std::unique_ptr<Fl_Image> visible(visibleSource.copy(104, 104));
-    hidden->scale(24, 24); visible->scale(26, 26);
+    std::unique_ptr<Fl_Image> hidden = makeIcon(hiddenSource, 96);
+    std::unique_ptr<Fl_Image> visible = makeIcon(visibleSource, 104);
     BindingList bindings;
     Fl_Double_Window screen(kWinW, kWinH, "DigiWallet");
     screen.color(bgColor());
