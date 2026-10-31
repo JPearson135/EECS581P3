@@ -71,7 +71,8 @@ run: build
 ifeq ($(PLATFORM),Darwin)
 app: build
 	mkdir -p $(APP_NAME).app/Contents/MacOS
-	cp $(TARGET) $(APP_NAME).app/Contents/MacOS/$(APP_NAME)
+	cp $(TARGET) $(APP_NAME).app/Contents/MacOS/$(APP_NAME).new
+	mv -f $(APP_NAME).app/Contents/MacOS/$(APP_NAME).new $(APP_NAME).app/Contents/MacOS/$(APP_NAME)
 	printf '%s\n' \
 	  '<?xml version="1.0" encoding="UTF-8"?>' \
 	  '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
@@ -83,6 +84,7 @@ app: build
 	  '<key>CFBundleVersion</key><string>1.0</string>' \
 	  '<key>NSHighResolutionCapable</key><true/>' \
 	  '</dict></plist>' > $(APP_NAME).app/Contents/Info.plist
+	codesign --force --sign - $(APP_NAME).app
 	@echo "Built $(APP_NAME).app: double-click it in Finder."
 else
 app:

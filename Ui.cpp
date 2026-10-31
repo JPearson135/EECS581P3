@@ -128,13 +128,14 @@ class EyeButton : public Fl_Button {
 public:
     EyeButton(int x, int y, int w, int h) : Fl_Button(x, y, w, h) {}
     bool insideField = false;
+    Fl_Widget* inputOwner = nullptr;
     void draw() override {
         fl_color(color());
         fl_rectf(x(), y(), w(), h());
         if (insideField) {
             fl_color(surfaceColor());
             fl_rectf(x(), y() + 5, w(), h() - 10);
-            fl_color(mutedColor());
+            fl_color(Fl::focus() == inputOwner ? accentColor() : mutedColor());
             fl_rectf(x(), y() + h() - 6, w(), 1);
         }
         if (image()) image()->draw(x() + (w() - image()->w()) / 2,
@@ -222,6 +223,7 @@ private:
 template <class Base>
 class Field : public Base {
 public:
+    EyeButton* embeddedEye = nullptr;
     Field(int x, int y, int w, int h) : Base(x, y, w, h) {
         this->box(FL_FLAT_BOX);
         this->color(surfaceColor());
@@ -232,9 +234,16 @@ public:
         this->when(FL_WHEN_ENTER_KEY_ALWAYS);
     }
     void draw() override {
+        if (embeddedEye) fl_push_clip(this->x(), this->y(), this->w() - 52, this->h());
         Base::draw();
+        if (embeddedEye) {
+            fl_pop_clip();
+            fl_color(this->color());
+            fl_rectf(this->x() + this->w() - 52, this->y(), 52, this->h());
+        }
         fl_color(Fl::focus() == this ? accentColor() : mutedColor());
         fl_rectf(this->x(), this->y() + this->h() - 1, this->w(), 1);
+        if (embeddedEye) embeddedEye->draw();
     }
 };
 
@@ -613,6 +622,7 @@ void addCardForm(const CardSubmit& submit) {
     }
     auto* toggle = new EyeButton(412, 353, 44, 44);
     toggle->insideField = true;
+    toggle->inputOwner = fields[2];
     static_cast<CardNumberField*>(fields[2])->eye = toggle;
     toggle->color(bgColor());
     toggle->image(visible.get());
@@ -729,8 +739,11 @@ bool createPasswordScreen(const std::string& rules,
     for (int i = 0; i < 2; ++i) {
         int y = 276 + i * 100;
         new Text(100, y, 420, 24, i ? "Confirm master password" : "Master password", 15, mutedColor());
-        fields[i] = new LiveSecretField(100, y + 30, 368, 34);
+        fields[i] = new LiveSecretField(100, y + 30, 420, 34);
         auto* eye = new EyeButton(476, y + 25, 44, 44);
+        eye->insideField = true;
+        eye->inputOwner = fields[i];
+        static_cast<LiveSecretField*>(fields[i])->embeddedEye = eye;
         eye->color(bgColor()); eye->image(visible.get());
         eye->tooltip("Show password");
         Fl_Input* field = fields[i];
@@ -777,9 +790,9 @@ bool createPasswordScreen(const std::string& rules,
             screen.hide();
         } else { error->copy_label(problem.c_str()); error->redraw(); }
     };
-    auto* cancel = new LinkButton(180, 556, 90, 30, "Cancel", false);
+    auto* cancel = new LinkButton(100, 556, 90, 30, "Cancel", false);
     cancel->callback(trampoline, bindings.add([&] { screen.hide(); }));
-    auto* create = new LinkButton(590, 556, 210, 30, "Create master password", true);
+    auto* create = new LinkButton(310, 556, 210, 30, "Create master password", true);
     create->callback(trampoline, bindings.add(save));
     fields[0]->callback(trampoline, bindings.add([&] { fields[1]->take_focus(); }));
     fields[1]->callback(trampoline, bindings.add(save));
@@ -806,8 +819,11 @@ bool unlockScreen(const std::function<bool(const std::string&)>& unlock) {
     new Text(180, 145, 620, 54, "Welcome back", 36, textColor());
     new Text(180, 212, 620, 48, "Enter your master password to unlock DigiWallet.", 17, mutedColor());
     new Text(180, 300, 620, 24, "Master password", 15, mutedColor());
-    auto* field = new Field<Fl_Secret_Input>(180, 336, 568, 34);
+    auto* field = new Field<Fl_Secret_Input>(180, 336, 620, 34);
     auto* eye = new EyeButton(756, 331, 44, 44);
+    eye->insideField = true;
+    eye->inputOwner = field;
+    field->embeddedEye = eye;
     eye->color(bgColor()); eye->image(visible.get()); eye->tooltip("Show password");
     eye->callback(trampoline, bindings.add([&] {
         const bool reveal = field->type() == FL_SECRET_INPUT;
