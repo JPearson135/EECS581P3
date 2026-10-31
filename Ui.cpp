@@ -36,6 +36,15 @@ Fl_Color accentColor()  { return rgb(200, 162, 106); }
 
 const int kWinW = 980, kWinH = 640, kHeaderH = 80, kMargin = 56;
 
+// Use the limiting dimension so text stays within the resized layout.
+int scaledText(const Fl_Widget& widget, int base) {
+    const Fl_Window* window = widget.window();
+    if (!window || !window->resizable()) return base;
+    const double scale = std::min(static_cast<double>(window->w()) / kWinW,
+                                  static_cast<double>(window->h()) / kWinH);
+    return std::max(1, static_cast<int>(base * scale + 0.5));
+}
+
 // Draws text with extra space between letters (FLTK has no letter-spacing).
 void drawSpaced(const std::string& text, int x, int y, int h, int gap) {
     int cursor = x;
@@ -61,10 +70,10 @@ public:
         : Fl_Widget(x, y, w, h), text_(text), size_(size), color_(color), spacing_(spacing),
           font_(font) {}
     void draw() override {
-        fl_font(font_, size_);
+        fl_font(font_, scaledText(*this, size_));
         fl_color(color_);
         if (spacing_ > 0) {
-            drawSpaced(text_, x(), y(), h(), spacing_);
+            drawSpaced(text_, x(), y(), h(), scaledText(*this, spacing_));
         } else {
             fl_draw(text_.c_str(), x(), y(), w(), h(),
                     FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_WRAP, nullptr, 0);
@@ -154,7 +163,7 @@ public:
     void draw() override {
         fl_color(bgColor());
         fl_rectf(x(), y(), w(), h());
-        fl_font(FL_HELVETICA, 14);
+        fl_font(FL_HELVETICA, scaledText(*this, 14));
         const int prefix = static_cast<int>(fl_width("— "));
         if (selected_) {
             fl_color(accentColor());
@@ -182,11 +191,11 @@ public:
         fl_rectf(x(), y() + h() - 1, w(), 1);
         if (first_) fl_rectf(x(), y(), w(), 1);
         const int indent = hovering() ? 14 : 0;
-        fl_font(FL_HELVETICA, 17);
+        fl_font(FL_HELVETICA, scaledText(*this, 17));
         fl_color(textColor());
         fl_draw(label(), x() + indent, y(), w() - 60, h(), FL_ALIGN_LEFT | FL_ALIGN_INSIDE,
                 nullptr, 0);
-        fl_font(FL_HELVETICA, 16);
+        fl_font(FL_HELVETICA, scaledText(*this, 16));
         fl_color(hovering() ? accentColor() : dimColor());
         fl_draw("→", x(), y(), w() - 14, h(), FL_ALIGN_RIGHT | FL_ALIGN_INSIDE, nullptr, 0);
     }
@@ -204,7 +213,7 @@ public:
     void draw() override {
         fl_color(bgColor());
         fl_rectf(x(), y(), w(), h());
-        fl_font(FL_HELVETICA, 15);
+        fl_font(FL_HELVETICA, scaledText(*this, 15));
         const bool lit = hovering() || Fl::focus() == this;
         fl_color(lit ? textColor() : mutedColor());
         fl_draw(label(), x(), y(), w(), h() - 8, FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
