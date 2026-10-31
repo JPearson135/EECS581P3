@@ -126,9 +126,16 @@ private:
 class EyeButton : public Fl_Button {
 public:
     EyeButton(int x, int y, int w, int h) : Fl_Button(x, y, w, h) {}
+    bool insideField = false;
     void draw() override {
         fl_color(color());
         fl_rectf(x(), y(), w(), h());
+        if (insideField) {
+            fl_color(surfaceColor());
+            fl_rectf(x(), y() + 5, w(), h() - 10);
+            fl_color(mutedColor());
+            fl_rectf(x(), y() + h() - 6, w(), 1);
+        }
         if (image()) image()->draw(x() + (w() - image()->w()) / 2,
                                    y() + (h() - image()->h()) / 2);
     }
@@ -232,6 +239,7 @@ public:
 
 class CardNumberField : public Field<Fl_Secret_Input> {
 public:
+    EyeButton* eye = nullptr;
     std::function<void()> onBlur, onEdit;
     using Field<Fl_Secret_Input>::Field;
     void draw() override {
@@ -275,6 +283,8 @@ public:
                     FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
             fl_pop_clip();
         }
+        // The eye overlaps the field: repaint it after every input redraw.
+        if (eye) eye->draw();
     }
     int handle(int event) override {
         // Let Backspace at a separator delete the preceding digit too.
@@ -578,7 +588,7 @@ void addCardForm(const CardSubmit& submit) {
     for (int i = 0; i < 4; ++i) {
         int y = 92 + i * 118;
         new Text(40, y, 460, 24, labels[i], 15, mutedColor());
-        if (i == 2) fields[i] = new CardNumberField(40, y + 30, 364, 34);
+        if (i == 2) fields[i] = new CardNumberField(40, y + 30, 416, 34);
         else if (i == 3) fields[i] = new ExpiryField(40, y + 30, 416, 34);
         else fields[i] = new Field<Fl_Input>(40, y + 30, 416, 34);
         warnings[i] = new Fl_Box(468, y + 35, 24, 24);
@@ -590,6 +600,8 @@ void addCardForm(const CardSubmit& submit) {
         errors[i]->align(FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_INSIDE | FL_ALIGN_WRAP);
     }
     auto* toggle = new EyeButton(412, 353, 44, 44);
+    toggle->insideField = true;
+    static_cast<CardNumberField*>(fields[2])->eye = toggle;
     toggle->color(bgColor());
     toggle->image(visible.get());
     toggle->tooltip("Show card number");
