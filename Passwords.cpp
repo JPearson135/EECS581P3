@@ -89,3 +89,39 @@ bool PasswordManager::validNotes(std::string_view s) {
 }
 
 // ------------------------------------------------------------------ file format
+//  EX:
+// The plaintext that gets encrypted (and therefore authenticated) looks like this:
+//   "DWPASS01" | number of entries (4 bytes) | for each entry:
+//   site | username | password | notes      (each one: length in 4 bytes, then the bytes)
+// All 4-byte numbers are BIG-endian.
+
+// Entries in memory -> one block of bytes. This block is what gets encrypted.
+security::SecretBytes PasswordManager::serialize() const {
+    // Exact size first, so we write straight into one SecretBytes with no leftover copies.
+    std::size_t total = kMagicSize + 4;
+    for (const Entry& e : entries_)
+        total += 16 + e.site.size() + e.username.size() + e.password.size() + e.notes.size();
+ 
+    security::SecretBytes out(total);
+    unsigned char* p = out.data();
+    putBytes(p, reinterpret_cast<const unsigned char*>(kMagic), kMagicSize);
+ 
+    putU32(p, entries_.size());
+    for (const Entry& e : entries_) {
+        putU32(p, e.site.size());
+        putBytes(p, reinterpret_cast<const unsigned char*>(e.site.data()), e.site.size());
+        putU32(p, e.username.size());
+        putBytes(p, reinterpret_cast<const unsigned char*>(e.username.data()), e.username.size());
+        putU32(p, e.password.size());
+        putBytes(p, e.password.data(), e.password.size());
+        putU32(p, e.notes.size());
+        putBytes(p, reinterpret_cast<const unsigned char*>(e.notes.data()), e.notes.size());
+    }
+    return out;
+}
+//continue here with reversal of serialize and parsing the bytes back into entries
+
+
+// ------------------------------------------------------------------ the manager
+
+
