@@ -125,3 +125,4 @@ security::SecretBytes PasswordManager::serialize() const {
 // ------------------------------------------------------------------ the manager
 
 
+}
