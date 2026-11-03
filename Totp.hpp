@@ -1,11 +1,24 @@
-// Totp.hpp - Authenticator feature. Stores authenticator accounts and generates the time-based 6-digit codes with the seconds remaining.
+// Totp.hpp - Authenticator feature. Stores authenticator accounts 
+// and generates the time-based 6-digit codes with the seconds remaining.
+#pragma once
 #include <string>
-using namespace std;
+#include <vector>
+#include <map>
+
+class AuthAccount{
+    public:
+    std::string name;
+    std::vector<std::uint8_t> secret;
+};
 
 class Authenticator{
     public:
-    void addAccount();
-    string currentCode();
+    void addAccount(const AuthAccount& account);
+    void removeAccount(const std::string& name);
+
+    std::string currentCode(const AuthAccount& account);
     int secondsRemaining();
-    void removeAccount();
+    
+    private:
+    std::map<std::string, AuthAccount> accounts; //store accounts by pairing their name with their object 
 };
