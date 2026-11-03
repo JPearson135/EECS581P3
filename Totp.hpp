@@ -13,12 +13,12 @@ class AuthAccount{
 
 class Authenticator{
     public:
-    void addAccount(const AuthAccount& account);
-    void removeAccount(const std::string& name);
+    bool addAccount(const AuthAccount& account);
+    bool removeAccount(const std::string& name);
 
     std::string currentCode(const AuthAccount& account);
     int secondsRemaining();
-    
+
     private:
     std::map<std::string, AuthAccount> accounts; //store accounts by pairing their name with their object 
 };
