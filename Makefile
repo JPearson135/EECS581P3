@@ -48,7 +48,7 @@ DEPS      = $(OBJS:.o=.d)
 LIB_OBJS  = $(filter-out $(BUILD_DIR)/Main.o,$(OBJS))
 PREFIX   ?= $(HOME)/.local
 
-.PHONY: all build run app debug test test-security test-wallet test-all check-deps clean install
+.PHONY: all build run app debug test test-security test-wallet test-all check-deps clean clean-build install
 
 all: build
 
@@ -144,5 +144,21 @@ install: build
 	cp $(TARGET) $(PREFIX)/bin/$(TARGET)
 	@echo "Installed to $(PREFIX)/bin/$(TARGET)"
 
-clean:
+# The program keeps everything it saves (vault.meta, the encrypted .enc files, .lock) in this
+# folder, NOT in the project folder. This is the folder Storage.cpp uses (see defaultDirectory()).
+override DATA_DIR := $(HOME)/.digiwallet
+
+# clean-build: removes only the compiled files. Your saved vault and data are kept.
+clean-build:
 	rm -rf $(BUILD_DIR) $(TARGET) $(DEBUG_TARGET) $(APP_NAME).app
+
+# clean: removes the compiled files AND ALL SAVED DATA (master password setup, cards, everything).
+# The next launch asks for a brand new master password. This cannot be undone.
+clean: clean-build
+	@if [ -z "$(HOME)" ] || [ "$(HOME)" = "/" ]; then \
+	  echo "HOME is not set safely, so the saved data folder was NOT deleted."; \
+	elif [ -d "$(DATA_DIR)" ]; then \
+	  rm -rf -- "$(DATA_DIR)" && echo "Deleted all saved data in $(DATA_DIR). Next launch asks for a new master password."; \
+	else \
+	  echo "No saved data found in $(DATA_DIR)."; \
+	fi
