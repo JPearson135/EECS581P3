@@ -1,6 +1,7 @@
 // Ui.cpp - FLTK front end. Dark, minimal look: near-black background, hairline
 // dividers, light text, one gold accent, uppercase spaced labels.
 #include "Ui.hpp"
+#include "IdleTimer.hpp"
 #include "Wallet.hpp"
 #include <ctime>
 #include <openssl/crypto.h>
@@ -21,6 +22,32 @@
 
 namespace ui {
 namespace {
+
+IdleTimer idleTimer;
+std::function<void()> idleCallback;
+int (*previousEventDispatch)(int, Fl_Window*) = nullptr;
+bool idleLockActive = false;
+
+bool isActivityEvent(int event) {
+    return event == FL_PUSH || event == FL_MOVE || event == FL_DRAG ||
+           event == FL_MOUSEWHEEL || event == FL_KEYBOARD || event == FL_SHORTCUT;
+}
+
+int dispatchEvent(int event, Fl_Window* window) {
+    if (isActivityEvent(event)) idleTimer.touch(std::time(nullptr));
+    return Fl::handle_(event, window);
+}
+
+void checkIdle(void*) {
+    if (!idleLockActive) return;
+    if (idleTimer.expired(std::time(nullptr))) {
+        idleLockActive = false;
+        std::function<void()> callback = std::move(idleCallback);
+        if (callback) callback();
+        return;
+    }
+    Fl::repeat_timeout(1.0, checkIdle);
+}
 
 Fl_Color rgb(int r, int g, int b) {
     return fl_rgb_color(static_cast<uchar>(r), static_cast<uchar>(g), static_cast<uchar>(b));
@@ -899,6 +926,24 @@ void init() {
     Fl::scheme("gtk+");
     Fl::background(13, 13, 12);
     Fl::foreground(233, 229, 220);
+}
+
+void setIdleLock(int seconds, std::function<void()> onIdle) {
+    clearIdleLock();
+    idleTimer = IdleTimer(seconds, std::time(nullptr));
+    idleCallback = std::move(onIdle);
+    previousEventDispatch = Fl::event_dispatch();
+    Fl::event_dispatch(dispatchEvent);
+    idleLockActive = seconds > 0;
+    if (idleLockActive) Fl::add_timeout(1.0, checkIdle);
+}
+
+void clearIdleLock() {
+    Fl::remove_timeout(checkIdle);
+    idleLockActive = false;
+    idleCallback = nullptr;
+    if (Fl::event_dispatch() == dispatchEvent) Fl::event_dispatch(previousEventDispatch);
+    previousEventDispatch = nullptr;
 }
 
 void showMessage(const std::string& text) { prompt(Kind::Message, text, nullptr); }

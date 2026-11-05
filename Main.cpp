@@ -12,13 +12,19 @@
 
 namespace {
 
+constexpr int kIdleSeconds = 300;
+
+void requestLock(bool& lockRequested) {
+    lockRequested = true;
+    for (Fl_Window* w = Fl::first_window(); w; w = Fl::first_window()) w->hide();
+}
+
 // Security menu: "Lock now" closes the window; main() then asks for the master password again.
 ui::Menu securityMenu(bool& lockRequested) {
     ui::Menu menu("Security");
     menu.add("Change master password", [] { ui::notImplemented("Change master password"); });
     menu.add("Lock now", [&lockRequested] {
-        lockRequested = true;
-        for (Fl_Window* w = Fl::first_window(); w; w = Fl::first_window()) w->hide();
+        requestLock(lockRequested);
     });
     return menu;
 }
@@ -57,7 +63,9 @@ int main() {
             root.addSubmenu("Backup",
                 ui::placeholderMenu("Backup", {"Create backup", "Restore backup"}));
             root.addSubmenu("Security", securityMenu(lockRequested));
+            ui::setIdleLock(kIdleSeconds, [&lockRequested] { requestLock(lockRequested); });
             root.run();
+            ui::clearIdleLock();
 
             // Window closed: forget the key and every card number before anything else happens.
             cards.lock();

@@ -13,6 +13,8 @@ void addCardForm(const CardSubmit& submit);
 bool createPasswordScreen(const std::string& rules, const std::function<std::string(const std::string&, const std::string&)>& submit);
 bool unlockScreen(const std::function<bool(const std::string&)>& unlock);
 void init();
+void setIdleLock(int seconds, std::function<void()> onIdle);
+void clearIdleLock();
 void showMessage(const std::string& text);
 void showSecret(const std::string& description, const std::string& secret);
 void notImplemented(const std::string& feature);
