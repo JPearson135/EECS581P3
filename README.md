@@ -87,9 +87,10 @@ down why in the documentation file.
 | `make test-wallet` | Tests for the bank card wallet. Does not need FLTK. |
 | `make test-all` | All of the above |
 | `make debug` | Builds `DigiWallet_debug` with memory-error checking turned on |
-| `make clean` | Deletes everything the build created |
+| `make clean` | Deletes everything the build created, but keeps saved wallet data |
+| `make wipe` | Deletes build files and all saved wallet data; the next launch starts a new vault |
 
-Where your data lives: `$HOME/.digiwallet/` (only you can open it). While developing, `rm -rf ~/.digiwallet`
+Where your data lives: `$HOME/.digiwallet/` (only you can open it). While developing, `make wipe`
 wipes the vault and starts fresh. **That deletes all stored data and cannot be undone.**
 
 ## How the master password and the vault work now (Requirements 1 to 4)

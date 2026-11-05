@@ -48,7 +48,7 @@ DEPS      = $(OBJS:.o=.d)
 LIB_OBJS  = $(filter-out $(BUILD_DIR)/Main.o,$(OBJS))
 PREFIX   ?= $(HOME)/.local
 
-.PHONY: all build run app debug test test-security test-wallet test-all check-deps clean clean-build install
+.PHONY: all build run app debug test test-security test-wallet test-all check-deps clean clean-build wipe install
 
 all: build
 
@@ -148,13 +148,16 @@ install: build
 # folder, NOT in the project folder. This is the folder Storage.cpp uses (see defaultDirectory()).
 override DATA_DIR := $(HOME)/.digiwallet
 
-# clean-build: removes only the compiled files. Your saved vault and data are kept.
+# clean-build is retained as an alias for the build-artifact cleanup.
 clean-build:
 	rm -rf $(BUILD_DIR) $(TARGET) $(DEBUG_TARGET) $(APP_NAME).app
 
-# clean: removes the compiled files AND ALL SAVED DATA (master password setup, cards, everything).
-# The next launch asks for a brand new master password. This cannot be undone.
+# clean: removes only the compiled files. Your saved vault and data are kept.
 clean: clean-build
+
+# wipe: removes the compiled files and ALL SAVED DATA (master password setup, cards, everything).
+# The next launch asks for a brand new master password. This cannot be undone.
+wipe: clean-build
 	@if [ -z "$(HOME)" ] || [ "$(HOME)" = "/" ]; then \
 	  echo "HOME is not set safely, so the saved data folder was NOT deleted."; \
 	elif [ -d "$(DATA_DIR)" ]; then \
