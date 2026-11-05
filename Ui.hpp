@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ui {
@@ -15,8 +16,10 @@ bool unlockScreen(const std::function<bool(const std::string&)>& unlock);
 void init();
 void setIdleLock(int seconds, std::function<void()> onIdle);
 void clearIdleLock();
-void showMessage(const std::string& text);
-void showSecret(const std::string& description, const std::string& secret);
+void showMessage(const std::string& text, const std::string& iconPath = "");
+const char* cardNetworkIcon(std::string_view digits);
+void showSecret(const std::string& description, const std::string& secret,
+                const std::string& iconPath = "");
 void notImplemented(const std::string& feature);
 bool confirm(const std::string& question);
 bool askText(const std::string& prompt, std::string& out, const std::string& initial = "");

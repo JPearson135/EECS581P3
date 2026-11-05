@@ -124,16 +124,20 @@ void viewCards(wallet::CardWallet& cards) {
     guarded([&] {
         const auto label = pickCard(cards, "View cards");
         if (!label) return;
-        for (const auto& c : cards.list()) {
-            if (c.label != *label) continue;
-            showMessage(c.label + "\n\nName: " + (c.holder.empty() ? "(none)" : c.holder) +
-                        "\nNumber: " + c.masked + "\nExpires: " + c.expiry + (c.expired ? "  (expired)" : ""));
-        }
-
         const auto number = cards.revealNumber(*label);
         if (!number) return;
+        for (const auto& c : cards.list()) {
+            if (c.label != *label) continue;
+            const std::string details =
+                c.label + "\n\nName: " + (c.holder.empty() ? "(none)" : c.holder) +
+                "\nNumber: " + c.masked + "\nExpires: " + c.expiry + (c.expired ? "  (expired)" : "");
+            showMessage(details, ui::cardNetworkIcon(number->view()));
+            break;
+        }
+
         // reveal saved card numbers only through the visibility toggle
-        showSecret(*label + " — Card number", std::string(number->view()));
+        showSecret(*label + " — Card number", std::string(number->view()),
+                   ui::cardNetworkIcon(number->view()));
     });
 }
 

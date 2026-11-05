@@ -18,6 +18,7 @@
 #include <FL/fl_utf8.h>
 #include <algorithm>
 #include <memory>
+#include <string_view>
 #include <utility>
 
 namespace ui {
@@ -31,6 +32,59 @@ bool idleLockActive = false;
 bool isActivityEvent(int event) {
     return event == FL_PUSH || event == FL_MOVE || event == FL_DRAG ||
            event == FL_MOUSEWHEEL || event == FL_KEYBOARD || event == FL_SHORTCUT;
+}
+
+enum class CardNetwork { Unknown, Visa, Mastercard, AmericanExpress, Discover };
+
+CardNetwork cardNetwork(std::string_view digits) {
+    std::string compact;
+    compact.reserve(digits.size());
+    for (char c : digits) {
+        if (c != ' ') compact.push_back(c);
+    }
+    if (!std::all_of(compact.begin(), compact.end(), [](char c) {
+            return c >= '0' && c <= '9';
+        })) return CardNetwork::Unknown;
+    if (!compact.empty() && compact.front() == '4') return CardNetwork::Visa;
+    if (compact.size() >= 2) {
+        const int prefix = (compact[0] - '0') * 10 + compact[1] - '0';
+        if (prefix >= 51 && prefix <= 55) return CardNetwork::Mastercard;
+        if (prefix == 34 || prefix == 37) return CardNetwork::AmericanExpress;
+        if (prefix == 65) return CardNetwork::Discover;
+    }
+    if (compact.size() >= 3) {
+        const int prefix = (compact[0] - '0') * 100 + (compact[1] - '0') * 10 + compact[2] - '0';
+        if (prefix >= 644 && prefix <= 649) return CardNetwork::Discover;
+    }
+    if (compact.size() >= 4) {
+        const int prefix = (compact[0] - '0') * 1000 + (compact[1] - '0') * 100 +
+                           (compact[2] - '0') * 10 + compact[3] - '0';
+        if (prefix >= 2221 && prefix <= 2720) return CardNetwork::Mastercard;
+        if (prefix == 6011) return CardNetwork::Discover;
+    }
+    return CardNetwork::Unknown;
+}
+
+const char* cardNetworkAsset(CardNetwork network) {
+    switch (network) {
+    case CardNetwork::Visa: return "Assets/visa.png";
+    case CardNetwork::Mastercard: return "Assets/mastercard.png";
+    case CardNetwork::AmericanExpress: return "Assets/americanexpress.png";
+    case CardNetwork::Discover: return "Assets/discover.png";
+    case CardNetwork::Unknown: return nullptr;
+    }
+    return nullptr;
+}
+
+const char* cardNetworkName(CardNetwork network) {
+    switch (network) {
+    case CardNetwork::Visa: return "VISA";
+    case CardNetwork::Mastercard: return "MASTERCARD";
+    case CardNetwork::AmericanExpress: return "AMERICAN EXPRESS";
+    case CardNetwork::Discover: return "DISCOVER";
+    case CardNetwork::Unknown: return "";
+    }
+    return "";
 }
 
 int dispatchEvent(int event, Fl_Window* window) {
@@ -493,7 +547,8 @@ enum class Kind { Message, Confirm, Text, Hidden };
 
 // One themed modal dialog used for every message and question.
 bool prompt(Kind kind, const std::string& message, std::string* value,
-            const std::string& initial = "", bool allowReveal = false, bool readOnly = false, bool cardNumber = false, bool expiry = false) {
+            const std::string& initial = "", bool allowReveal = false, bool readOnly = false,
+            bool cardNumber = false, bool expiry = false, const std::string& iconPath = "") {
     Fl_PNG_Image hiddenImage("hidden", hiddenIcon, sizeof(hiddenIcon));
     Fl_PNG_Image visibleImage("visible", visibleIcon, sizeof(visibleIcon));
     // keep four physical pixels per logical pixel for crisp retina rendering.
@@ -501,10 +556,13 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
     std::unique_ptr<Fl_Image> hiddenDisplay = makeIcon(hiddenImage, 96);
     std::unique_ptr<Fl_Image> visibleDisplay = makeIcon(visibleImage, 104);
     const int width = 480, pad = 40, inner = width - 2 * pad;
-    const int messageH = textHeight(message, inner, 15);
+    const bool hasIcon = !iconPath.empty();
+    const int messageWidth = hasIcon ? inner - 112 : inner;
+    const int messageH = textHeight(message, messageWidth, 15);
+    const int messageAreaH = std::max(messageH, hasIcon ? 56 : messageH);
     const bool input = kind == Kind::Text || kind == Kind::Hidden;
     const int inputH = input ? 34 : 0;
-    const int height = 32 + 16 + 28 + messageH + (input ? 24 + inputH : 0) + 40 + 30 + 36;
+    const int height = 32 + 16 + 28 + messageAreaH + (input ? 24 + inputH : 0) + 40 + 30 + 36;
 
     BindingList bindings;
     bool accepted = false;
@@ -517,8 +575,23 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
     new Dot(pad, 41);
     new Text(pad + 18, 32, inner, 24, "DIGIWALLET", 12, textColor(), 4, FL_HELVETICA_BOLD);
     int y = 32 + 16 + 28;
-    new Text(pad, y, inner, messageH + 4, message, 15, mutedColor());
-    y += messageH;
+    new Text(pad, y, messageWidth, messageH + 4, message, 15, mutedColor());
+    std::unique_ptr<Fl_Image> messageIcon;
+    if (hasIcon) {
+        Fl_PNG_Image source(iconPath.c_str());
+        messageIcon.reset(source.copy(96, 56));
+        auto* icon = new Fl_Box(width - pad - 96, y - 8, 96, 56);
+        if (messageIcon) icon->image(messageIcon.get());
+        if (!messageIcon) {
+            icon->copy_label(cardNetworkName(cardNetwork(
+                iconPath.find("visa") != std::string::npos ? "4" :
+                iconPath.find("mastercard") != std::string::npos ? "51" :
+                iconPath.find("americanexpress") != std::string::npos ? "34" : "65")));
+            icon->labelcolor(accentColor());
+            icon->labelsize(12);
+        }
+    }
+    y += messageAreaH;
 
     Fl_Input* field = nullptr;
     if (input) {
@@ -653,6 +726,8 @@ void addCardForm(const CardSubmit& submit) {
     // show the warning beside its field and the explanation below it
     Fl_PNG_Image warningSource("warning", warningIcon, sizeof(warningIcon));
     std::unique_ptr<Fl_Image> warning = makeIcon(warningSource, 96);
+    std::unique_ptr<Fl_Image> cardNetworkLogo;
+    Fl_Box* cardNetworkBox = nullptr;
     Fl_Input* fields[4];
     Fl_Box* errors[4];
     Fl_Box* warnings[4];
@@ -686,6 +761,34 @@ void addCardForm(const CardSubmit& submit) {
         toggle->redraw();
     }));
     auto* numberInput = static_cast<CardNumberField*>(fields[2]);
+    cardNetworkBox = new Fl_Box(492, 122, 48, 32);
+    cardNetworkBox->hide();
+    auto updateCardNetwork = [&] {
+        std::string digits = fields[2]->value();
+        digits.erase(std::remove(digits.begin(), digits.end(), ' '), digits.end());
+        const char* asset = cardNetworkAsset(cardNetwork(digits));
+        if (asset) {
+            Fl_PNG_Image source(asset);
+            cardNetworkLogo.reset(source.copy(48, 32));
+            if (cardNetworkLogo) {
+                cardNetworkBox->image(cardNetworkLogo.get());
+                cardNetworkBox->copy_label("");
+            } else {
+                cardNetworkBox->image(nullptr);
+                cardNetworkBox->copy_label(cardNetworkName(cardNetwork(digits)));
+                cardNetworkBox->labelcolor(accentColor());
+                cardNetworkBox->labelsize(11);
+            }
+            cardNetworkBox->show();
+        } else {
+            cardNetworkLogo.reset();
+            cardNetworkBox->image(nullptr);
+            cardNetworkBox->copy_label("");
+            cardNetworkBox->hide();
+        }
+        fields[2]->redraw();
+        dialog.redraw();
+    };
     auto numberValid = [&] {
         std::string number = fields[2]->value();
         number.erase(std::remove(number.begin(), number.end(), ' '), number.end());
@@ -701,6 +804,7 @@ void addCardForm(const CardSubmit& submit) {
         dialog.redraw();
     };
     numberInput->onEdit = [&] {
+        updateCardNetwork();
         if (numberValid()) {
             errors[2]->copy_label("");
             warnings[2]->hide();
@@ -946,11 +1050,19 @@ void clearIdleLock() {
     previousEventDispatch = nullptr;
 }
 
-void showMessage(const std::string& text) { prompt(Kind::Message, text, nullptr); }
+void showMessage(const std::string& text, const std::string& iconPath) {
+    prompt(Kind::Message, text, nullptr, "", false, false, false, false, iconPath);
+}
+
+const char* cardNetworkIcon(std::string_view digits) {
+    const char* icon = cardNetworkAsset(cardNetwork(digits));
+    return icon ? icon : "";
+}
 
 // show saved sensitive values read-only with the same eye toggle
-void showSecret(const std::string& description, const std::string& secret) {
-    prompt(Kind::Hidden, description, nullptr, secret, true, true);
+void showSecret(const std::string& description, const std::string& secret,
+                const std::string& iconPath) {
+    prompt(Kind::Hidden, description, nullptr, secret, true, true, false, false, iconPath);
 }
 
 void notImplemented(const std::string& feature) {
