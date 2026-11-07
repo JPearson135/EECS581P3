@@ -20,6 +20,9 @@
 #include <memory>
 #include <string_view>
 #include <utility>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 
 namespace ui {
 namespace {
@@ -76,6 +79,22 @@ const char* cardNetworkAsset(CardNetwork network) {
     return nullptr;
 }
 
+// resolve bundled logos independently of the finder working directory
+std::string cardLogoPath(const std::string& path) {
+#ifdef __APPLE__
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string executable(size, '\0');
+    if (_NSGetExecutablePath(executable.data(), &size) == 0) {
+        executable.resize(executable.find('\0'));
+        const auto macos = executable.rfind("/Contents/MacOS/");
+        if (macos != std::string::npos)
+            return executable.substr(0, macos) + "/Contents/Resources/" + path;
+    }
+#endif
+    return path;
+}
+
 const char* cardNetworkName(CardNetwork network) {
     switch (network) {
     case CardNetwork::Visa: return "VISA";
@@ -129,6 +148,51 @@ std::unique_ptr<Fl_Image> makeIcon(Fl_Image& source, int backing) {
     return icon;
 #else
     return std::unique_ptr<Fl_Image>(source.copy(backing / 4, backing / 4));
+#endif
+}
+
+// keep the logo proportions and retain the original pixels on high density displays
+std::unique_ptr<Fl_Image> loadCardLogo(const std::string& asset, int width, int height) {
+    Fl_PNG_Image source(cardLogoPath(asset).c_str());
+    if (source.fail() || source.w() <= 0 || source.h() <= 0) return nullptr;
+    // fit the visible artwork, excluding transparent padding around each logo
+    int left = 0, top = 0, right = source.w(), bottom = source.h();
+    const int depth = source.d();
+    const int stride = source.ld() ? source.ld() : source.w() * depth;
+    const auto* pixels = reinterpret_cast<const unsigned char*>(source.data()[0]);
+    if (depth == 2 || depth == 4) {
+        int minX = right, minY = bottom, maxX = 0, maxY = 0;
+        for (int y = 0; y < bottom; ++y) {
+            for (int x = 0; x < right; ++x) {
+                if (pixels[y * stride + x * depth + depth - 1] == 0) continue;
+                minX = std::min(minX, x);
+                minY = std::min(minY, y);
+                maxX = std::max(maxX, x + 1);
+                maxY = std::max(maxY, y + 1);
+            }
+        }
+        if (maxX <= minX || maxY <= minY) return nullptr;
+        left = minX;
+        top = minY;
+        right = maxX;
+        bottom = maxY;
+    }
+    const int artworkWidth = right - left;
+    const int artworkHeight = bottom - top;
+    Fl_RGB_Image artwork(pixels + top * stride + left * depth,
+                         artworkWidth, artworkHeight, depth, stride);
+    Fl_Image::RGB_scaling(FL_RGB_SCALING_BILINEAR);
+#if FL_API_VERSION >= 10400
+    Fl_Image::scaling_algorithm(FL_RGB_SCALING_BILINEAR);
+    std::unique_ptr<Fl_Image> logo(artwork.copy(artworkWidth, artworkHeight));
+    logo->scale(width, height);
+    return logo;
+#else
+    const double scale = std::min(static_cast<double>(width) / artworkWidth,
+                                  static_cast<double>(height) / artworkHeight);
+    return std::unique_ptr<Fl_Image>(artwork.copy(
+        std::max(1, static_cast<int>(artworkWidth * scale)),
+        std::max(1, static_cast<int>(artworkHeight * scale))));
 #endif
 }
 
@@ -358,7 +422,7 @@ public:
 class CardNumberField : public Field<Fl_Secret_Input> {
 public:
     EyeButton* eye = nullptr;
-    std::function<void()> onBlur, onEdit;
+    std::function<void()> onFocus, onBlur, onEdit;
     using Field<Fl_Secret_Input>::Field;
     void draw() override {
         if (type() != FL_SECRET_INPUT || !value()[0]) {
@@ -410,6 +474,7 @@ public:
             position() == mark() && position() > 0 && value()[position() - 1] == ' ')
             position(position() - 1);
         const int used = Field<Fl_Secret_Input>::handle(event);
+        if (event == FL_FOCUS && used && onFocus) onFocus();
         if (event == FL_UNFOCUS && onBlur) onBlur();
         if (event != FL_KEYBOARD && event != FL_PASTE) return used;
         std::string digits;
@@ -578,8 +643,7 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
     new Text(pad, y, messageWidth, messageH + 4, message, 15, mutedColor());
     std::unique_ptr<Fl_Image> messageIcon;
     if (hasIcon) {
-        Fl_PNG_Image source(iconPath.c_str());
-        messageIcon.reset(source.copy(96, 56));
+        messageIcon = loadCardLogo(iconPath, 96, 56);
         auto* icon = new Fl_Box(width - pad - 96, y - 8, 96, 56);
         if (messageIcon) icon->image(messageIcon.get());
         if (!messageIcon) {
@@ -710,6 +774,20 @@ std::string expiryProblem(const std::string& expiry) {
     return "";
 }
 
+// center the status image without reserving space for a text label
+class CardStatusBox : public Fl_Box {
+public:
+    using Fl_Box::Fl_Box;
+    void draw() override {
+        if (auto* logo = image()) {
+            logo->draw(x() + (w() - logo->w()) / 2,
+                       y() + (h() - logo->h()) / 2);
+        } else {
+            Fl_Box::draw();
+        }
+    }
+};
+
 // keep card entry and field errors together in one form
 void addCardForm(const CardSubmit& submit) {
     Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
@@ -761,15 +839,17 @@ void addCardForm(const CardSubmit& submit) {
         toggle->redraw();
     }));
     auto* numberInput = static_cast<CardNumberField*>(fields[2]);
-    cardNetworkBox = new Fl_Box(492, 122, 48, 32);
+    // share the warning slot and keep a gap after the input
+    cardNetworkBox = new CardStatusBox(warnings[2]->x() - 4,
+                                       fields[2]->y() + (fields[2]->h() - 22) / 2, 32, 22);
     cardNetworkBox->hide();
     auto updateCardNetwork = [&] {
         std::string digits = fields[2]->value();
         digits.erase(std::remove(digits.begin(), digits.end(), ' '), digits.end());
         const char* asset = cardNetworkAsset(cardNetwork(digits));
-        if (asset) {
-            Fl_PNG_Image source(asset);
-            cardNetworkLogo.reset(source.copy(48, 32));
+        // show the network logo only when the warning is hidden
+        if (asset && !warnings[2]->visible()) {
+            cardNetworkLogo = loadCardLogo(asset, cardNetworkBox->w(), cardNetworkBox->h());
             if (cardNetworkLogo) {
                 cardNetworkBox->image(cardNetworkLogo.get());
                 cardNetworkBox->copy_label("");
@@ -797,19 +877,24 @@ void addCardForm(const CardSubmit& submit) {
         return valid;
     };
     // check after leaving the field and clear the warning when corrected
+    // restore the logo from the current prefix when editing resumes
+    numberInput->onFocus = [&] {
+        errors[2]->copy_label("");
+        warnings[2]->hide();
+        updateCardNetwork();
+    };
     numberInput->onBlur = [&] {
         const bool valid = numberValid();
         errors[2]->copy_label(valid ? "" : "Check the card number: use 12–19 digits and a valid card checksum.");
         if (valid) warnings[2]->hide(); else warnings[2]->show();
-        dialog.redraw();
+        updateCardNetwork();
     };
     numberInput->onEdit = [&] {
-        updateCardNetwork();
         if (numberValid()) {
             errors[2]->copy_label("");
             warnings[2]->hide();
-            dialog.redraw();
         }
+        updateCardNetwork();
     };
     auto* expiryInput = static_cast<ExpiryField*>(fields[3]);
     // check the expiry when focus leaves and clear corrected warnings
@@ -836,7 +921,7 @@ void addCardForm(const CardSubmit& submit) {
         catch (const std::exception&) { problem = {0, "Could not save the card. Please try again."}; }
         std::fill(number.begin(), number.end(), '\0');
         if (problem.message.empty()) { fields[2]->value(""); dialog.hide(); }
-        else { errors[problem.field]->copy_label(problem.message.c_str()); warnings[problem.field]->show(); dialog.redraw(); }
+        else { errors[problem.field]->copy_label(problem.message.c_str()); warnings[problem.field]->show(); updateCardNetwork(); }
     };
     auto* cancel = new LinkButton(280, 610, 90, 30, "Cancel", false);
     cancel->callback(trampoline, bindings.add([&] { fields[2]->value(""); dialog.hide(); }));

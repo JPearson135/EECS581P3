@@ -71,6 +71,8 @@ run: build
 ifeq ($(PLATFORM),Darwin)
 app: build
 	mkdir -p $(APP_NAME).app/Contents/MacOS
+	mkdir -p $(APP_NAME).app/Contents/Resources/Assets
+	cp Assets/visa.png Assets/mastercard.png Assets/americanexpress.png Assets/discover.png $(APP_NAME).app/Contents/Resources/Assets/
 	# replace the executable instead of overwriting the running copy
 	cp $(TARGET) $(APP_NAME).app/Contents/MacOS/$(APP_NAME).new
 	mv -f $(APP_NAME).app/Contents/MacOS/$(APP_NAME).new $(APP_NAME).app/Contents/MacOS/$(APP_NAME)
