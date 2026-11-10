@@ -23,7 +23,7 @@ bool hasControlChar(std::string_view text) {
 char lower(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
  
 // Case-insensitive comparison (used for site names and usernames).
-bool sameText(std::string_view a, std::string_view b) {
+[[maybe_unused]] bool sameText(std::string_view a, std::string_view b) {  // TODO: remove [[maybe_unused]] once indexOf() uses it
     if (a.size() != b.size()) return false;
     for (std::size_t i = 0; i < a.size(); ++i)
         if (lower(a[i]) != lower(b[i])) return false;
@@ -119,10 +119,81 @@ security::SecretBytes PasswordManager::serialize() const {
     }
     return out;
 }
-//continue here with reversal of serialize and parsing the bytes back into entries
-
+// TODO (Req 5/6): parse() - reverse of serialize(). Copy CardWallet::parse in Wallet.cpp:
+//   check magic + count (<= kMaxEntries), read the 4 length-prefixed fields per entry with Reader,
+//   re-check with valid*(), reject duplicate site+username and leftover bytes. All or nothing.
+std::optional<std::vector<PasswordManager::Entry>> PasswordManager::parse(const security::SecretBytes& plain) {
+    (void)plain;
+    return std::nullopt;
+}
 
 // ------------------------------------------------------------------ the manager
 
+PasswordManager::PasswordManager(security::KeyManager& keys, storage::SecureFileStore& store)
+    : keys_(keys), store_(store) {}
 
+// TODO (Req 6): load() - copy CardWallet::load(). Locked if the vault is locked; missing file = empty list;
+//   decryptFile + parse; any failure = Damaged (nothing loaded).
+LoadResult PasswordManager::load() {
+    return LoadResult::Locked;
 }
+
+// TODO (Req 3): lock() - clear entries_ (passwords wipe themselves) and set loaded_ = false.
+void PasswordManager::lock() {
+}
+
+// TODO (Req 5): save() - serialize() -> keys_.encryptFile(kFileName, ...) -> store_.write(kFileName, ...).
+void PasswordManager::save() const {
+}
+
+// TODO (Req 5/6): indexOf() - position of the entry with this site AND username (use sameText), or -1.
+int PasswordManager::indexOf(std::string_view site, std::string_view username) const {
+    (void)site; (void)username;
+    return -1;
+}
+
+// TODO (Req 5): add() - throw if not loaded; check validSite/Username/Password/Notes (return Bad*),
+//   Duplicate, Full; push_back, then save(); if save() throws, pop_back() and rethrow.
+AddResult PasswordManager::add(std::string_view site, std::string_view username,
+                               std::string_view password, std::string_view notes) {
+    (void)site; (void)username; (void)password; (void)notes;
+    return AddResult::BadSite;
+}
+
+// TODO: remove() - like CardWallet::remove(): erase, save(), put it back if save() throws.
+bool PasswordManager::remove(std::string_view site, std::string_view username) {
+    (void)site; (void)username;
+    return false;
+}
+
+// TODO: changePassword() - validPassword or throw; replace the password, save(), restore the old one on failure.
+bool PasswordManager::changePassword(std::string_view site, std::string_view username,
+                                     std::string_view newPassword) {
+    (void)site; (void)username; (void)newPassword;
+    return false;
+}
+
+// TODO (Req 6): list() - throw if not loaded; return site, username, notes for every entry (never the password).
+std::vector<EntrySummary> PasswordManager::list() const {
+    return {};
+}
+
+// TODO (Req 6): revealPassword() - throw if not loaded; return a copy of the password in a SecretBytes, or nothing.
+//   (SecretBytes cannot be copied: build a new one from data() and size().)
+std::optional<security::SecretBytes> PasswordManager::revealPassword(std::string_view site,
+                                                                     std::string_view username) const {
+    (void)site; (void)username;
+    return std::nullopt;
+}
+
+// ------------------------------------------------------------------ password generator
+
+// TODO (Req 7): generatePassword() - reject no types chosen or length < number of chosen types (and > kMaxPassword);
+//   pick one random character from each chosen type, fill the rest from all chosen types,
+//   shuffle; use security::crypto::randomBytes (never rand()) and avoid modulo bias (discard values that skew the pick).
+std::optional<security::SecretBytes> generatePassword(const GenerateOptions& options) {
+    (void)options;
+    return std::nullopt;
+}
+
+}  // namespace passwords

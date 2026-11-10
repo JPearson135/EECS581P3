@@ -35,6 +35,8 @@ struct EntrySummary {
     std::string notes;
 };
  
+// TODO (Req 7): declare the random password generator here (a settings struct for length + which character
+// types, and a generatePassword function that returns a SecretBytes). Implement it in Passwords.cpp.
 class PasswordManager {
 public:
     static constexpr const char* kFileName = "passwords.enc";
@@ -44,21 +46,29 @@ public:
     static constexpr std::size_t kMaxNotes = 200;
     static constexpr std::size_t kMaxEntries = 1000;
  
+    // TODO: define this constructor in Passwords.cpp (store keys_ and store_).
     PasswordManager(security::KeyManager& keys, storage::SecureFileStore& store);
  
+    // TODO (Req 6): implement in Passwords.cpp. Read + decrypt passwords.enc; a damaged file loads nothing.
     LoadResult load();  // call right after login
+    // TODO (Req 3): implement in Passwords.cpp. Clear the entries so the passwords wipe themselves.
     void lock();        // clears everything from memory
  
     // All of these throw std::runtime_error if not loaded, or if a save fails
     // (after undoing the change in memory).
+    // TODO (Req 5): implement in Passwords.cpp. Validate, reject duplicates, save, undo if the save fails.
     AddResult add(std::string_view site, std::string_view username,
                   std::string_view password, std::string_view notes);
+    // TODO: implement in Passwords.cpp. Erase the entry and save; put it back if the save fails.
     bool remove(std::string_view site, std::string_view username);
+    // TODO: implement in Passwords.cpp. Replace the password and save; restore the old one if the save fails.
     // Returns false if the entry is missing; throws if the new password is invalid.
     bool changePassword(std::string_view site, std::string_view username,
                         std::string_view newPassword);
  
+    // TODO (Req 6): implement in Passwords.cpp. Site, username and notes only, never the password.
     std::vector<EntrySummary> list() const;
+    // TODO (Req 6): implement in Passwords.cpp. Return a copy of the password in a SecretBytes, or nothing.
     // The ONLY way to get a password. Let the result go out of scope quickly.
     std::optional<security::SecretBytes> revealPassword(std::string_view site,
                                                         std::string_view username) const;
@@ -78,8 +88,11 @@ private:
     };
  
     security::SecretBytes serialize() const;
+    // TODO (Req 5/6): implement parse() in Passwords.cpp (the reverse of serialize()).
     static std::optional<std::vector<Entry>> parse(const security::SecretBytes& plain);
+    // TODO (Req 5): implement save() in Passwords.cpp (serialize -> encryptFile -> store_.write).
     void save() const;
+    // TODO (Req 5/6): implement indexOf() in Passwords.cpp (match on site AND username, ignoring capitals).
     int indexOf(std::string_view site, std::string_view username) const;
  
     security::KeyManager& keys_;
