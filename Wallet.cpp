@@ -14,6 +14,7 @@ namespace {
 // fine but is not a card list.
 // (The 8-letter tag below is the first thing in the decrypted data. If it is missing, we know the file is not a card list.)
 constexpr char kMagic[] = "DWCARDS1";
+constexpr char kStarredMagic[] = "DWCARDS2";
 constexpr std::size_t kMagicSize = sizeof(kMagic) - 1;  // 8, without the trailing zero
 
 // True if the text contains an invisible control character (tab, newline, and so on).
@@ -155,6 +156,7 @@ std::string CardWallet::mask(const security::SecretBytes& digits) {
 // The plaintext that gets encrypted (and therefore authenticated) looks like this:
 //   "DWCARDS1" | number of cards (4 bytes) | for each card:
 //   label | holder | number | expiry      (each one: length in 4 bytes, then the bytes)
+// version 2 appends one star flag byte to each card
 // All 4-byte numbers are big-endian.
 
 // Cards in memory -> one block of bytes (the format described above). This block is what gets encrypted.
@@ -162,13 +164,16 @@ security::SecretBytes CardWallet::serialize() const {
     // Work out the exact size first, so the data can be written straight into a SecretBytes
     // (a std::vector or std::string here would leave unwiped copies of the numbers).
     // Add up the exact size first, so we write straight into one SecretBytes with no leftover copies.
-    std::size_t total = kMagicSize + 4;
+    // keep writing version 1 for wallets without starred cards
+    const bool hasStars = std::any_of(cards_.begin(), cards_.end(),
+                                      [](const Card& card) { return card.starred; });
+    std::size_t total = kMagicSize + 4 + (hasStars ? cards_.size() : 0);
     for (const Card& c : cards_)
         total += 16 + c.label.size() + c.holder.size() + c.number.size() + c.expiry.size();
 
     security::SecretBytes out(total);
     unsigned char* p = out.data();
-    putBytes(p, reinterpret_cast<const unsigned char*>(kMagic), kMagicSize);
+    putBytes(p, reinterpret_cast<const unsigned char*>(hasStars ? kStarredMagic : kMagic), kMagicSize);
 
     // Write the card count, then each card as four length-prefixed fields.
     putU32(p, cards_.size());
@@ -181,6 +186,7 @@ security::SecretBytes CardWallet::serialize() const {
         putBytes(p, c.number.data(), c.number.size());
         putU32(p, c.expiry.size());
         putBytes(p, reinterpret_cast<const unsigned char*>(c.expiry.data()), c.expiry.size());
+        if (hasStars) *p++ = c.starred ? 1 : 0;
     }
     return out;
 }
@@ -194,7 +200,9 @@ std::optional<std::vector<CardWallet::Card>> CardWallet::parse(const security::S
     std::size_t count = 0;
 
     // Check the 8-letter tag, then the card count (capped at 500).
-    if (!in.bytes(kMagicSize, magic) || !std::equal(magic, magic + kMagicSize, kMagic) ||
+    if (!in.bytes(kMagicSize, magic)) return std::nullopt;
+    const bool hasStars = std::equal(magic, magic + kMagicSize, kStarredMagic);
+    if ((!hasStars && !std::equal(magic, magic + kMagicSize, kMagic)) ||
         !in.u32(count) || count > kMaxCards)
         return std::nullopt;
 
@@ -209,6 +217,11 @@ std::optional<std::vector<CardWallet::Card>> CardWallet::parse(const security::S
             if (!in.u32(length[f]) || !in.bytes(length[f], field[f])) return std::nullopt;
 
         Card card;
+        if (hasStars) {
+            const unsigned char* flag = nullptr;
+            if (!in.bytes(1, flag) || *flag > 1) return std::nullopt;
+            card.starred = *flag == 1;
+        }
         card.label.assign(reinterpret_cast<const char*>(field[0]), length[0]);
         card.holder.assign(reinterpret_cast<const char*>(field[1]), length[1]);
         card.expiry.assign(reinterpret_cast<const char*>(field[3]), length[3]);
@@ -310,6 +323,23 @@ AddResult CardWallet::add(std::string_view label, std::string_view holder,
 }
 
 
+// save the preference with the card and restore it if saving fails
+bool CardWallet::setStarred(std::string_view label, bool starred) {
+    if (!loaded_) throw std::runtime_error("Wallet is not loaded");
+    const int index = indexOf(label);
+    if (index < 0) return false;
+    Card& card = cards_[static_cast<std::size_t>(index)];
+    if (card.starred == starred) return true;
+    card.starred = starred;
+    try {
+        save();
+    } catch (...) {
+        card.starred = !starred;
+        throw;
+    }
+    return true;
+}
+
 // Removes a card and saves. If the save fails the card is put back in its old position.
 bool CardWallet::remove(std::string_view label) {
     if (!loaded_) throw std::runtime_error("Wallet is not loaded");
@@ -334,8 +364,9 @@ std::vector<CardSummary> CardWallet::list() const {
     localtime_r(&now, &local);
     std::vector<CardSummary> out;
     for (const Card& c : cards_)
-        out.push_back({c.label, c.holder, c.expiry, mask(c.number),
+        out.push_back({c.label, c.holder, c.expiry, mask(c.number), c.starred,
                        isExpired(c.expiry, local.tm_year + 1900, local.tm_mon + 1)});
+    std::stable_partition(out.begin(), out.end(), [](const CardSummary& card) { return card.starred; });
     return out;
 }
 

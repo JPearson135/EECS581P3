@@ -18,9 +18,6 @@ const char* const kNotLoaded =
 const char* const kSaveFailed =
     "That could not be saved, so nothing was changed. Please try again.";
 
-// The picker dialog fits about this many rows. With more cards we ask for the label instead.
-const std::size_t kMaxPickerRows = 7;
-
 // Overwrites a string that held a card number, so it does not linger in memory.
 void wipe(std::string& s) {
     volatile char* p = s.empty() ? nullptr : &s[0];
@@ -65,23 +62,6 @@ std::optional<std::string> pickCard(const wallet::CardWallet& cards, const std::
         showMessage("There are no saved cards yet. Choose \"Add card\" first.");
         return std::nullopt;
     }
-    if (list.size() > kMaxPickerRows) {
-        std::string label;
-        while (askText("You have " + std::to_string(list.size()) +
-                       " cards. Type the label of the one you want:", label)) {
-            for (const auto& c : list)
-                if (c.label == label) return label;
-            showMessage("No card has that label. Check the spelling (capital letters do not matter).");
-            for (const auto& c : list) {  // labels ignore capitals, so accept any capitalisation
-                std::string a = c.label, b = label;
-                for (char& ch : a) if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
-                for (char& ch : b) if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
-                if (a == b) return c.label;
-            }
-        }
-        return std::nullopt;
-    }
-
     std::optional<std::string> chosen;
     Menu picker(title, "Cancel");
     for (const auto& c : list) {
@@ -90,7 +70,7 @@ std::optional<std::string> pickCard(const wallet::CardWallet& cards, const std::
             chosen = label;
             // Closing the picker: it is the top window while it is open.
             if (Fl_Window* top = Fl::first_window()) top->hide();
-        });
+        }, c.starred);
     }
     // Menu::run() is for the main window. A submenu opens as a small dialog, so wrap the picker in a
     // throwaway parent and "invoke" it. This uses Ui.cpp exactly as it is.
@@ -131,7 +111,8 @@ void viewCards(wallet::CardWallet& cards) {
             const std::string details =
                 c.label + "\n\nName: " + (c.holder.empty() ? "(none)" : c.holder) +
                 "\nNumber: " + c.masked + "\nExpires: " + c.expiry + (c.expired ? "  (expired)" : "");
-            showMessage(details, ui::cardNetworkIcon(number->view()));
+            showCardDetails(details, ui::cardNetworkIcon(number->view()), c.starred,
+                            [&](bool starred) { return cards.setStarred(c.label, starred); });
             break;
         }
 

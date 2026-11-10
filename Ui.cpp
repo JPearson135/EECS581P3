@@ -371,10 +371,14 @@ public:
         fl_color(lineColor());
         fl_rectf(x(), y() + h() - 1, w(), 1);
         if (first_) fl_rectf(x(), y(), w(), 1);
-        const int indent = hovering() ? 14 : 0;
+        int indent = hovering() ? 14 : 0;
+        if (auto* marker = image()) {
+            marker->draw(x() + indent, y() + (h() - marker->h()) / 2);
+            indent += marker->w() + 8;
+        }
         fl_font(FL_HELVETICA, scaledText(*this, 17));
         fl_color(textColor());
-        fl_draw(label(), x() + indent, y(), w() - 60, h(), FL_ALIGN_LEFT | FL_ALIGN_INSIDE,
+        fl_draw(label(), x() + indent, y(), w() - 60 - indent, h(), FL_ALIGN_LEFT | FL_ALIGN_INSIDE,
                 nullptr, 0);
         fl_font(FL_HELVETICA, scaledText(*this, 16));
         fl_color(hovering() ? accentColor() : dimColor());
@@ -631,15 +635,23 @@ void centre(Fl_Window& window) {
 enum class Kind { Message, Confirm, Text, Hidden };
 
 // One themed modal dialog used for every message and question.
+struct CardStarControl {
+    bool starred;
+    const std::function<bool(bool)>& save;
+};
+
 bool prompt(Kind kind, const std::string& message, std::string* value,
             const std::string& initial = "", bool allowReveal = false, bool readOnly = false,
-            bool cardNumber = false, bool expiry = false, const std::string& iconPath = "") {
+            bool cardNumber = false, bool expiry = false, const std::string& iconPath = "",
+            CardStarControl* star = nullptr) {
     Fl_PNG_Image hiddenImage("hidden", hiddenIcon, sizeof(hiddenIcon));
     Fl_PNG_Image visibleImage("visible", visibleIcon, sizeof(visibleIcon));
     // keep four physical pixels per logical pixel for crisp retina rendering.
     // the open-eye artwork has more transparent padding, so compensate optically.
     std::unique_ptr<Fl_Image> hiddenDisplay = makeIcon(hiddenImage, 96);
     std::unique_ptr<Fl_Image> visibleDisplay = makeIcon(visibleImage, 104);
+    auto emptyStar = star ? loadCardLogo("Assets/star_empty.png", 22, 22) : nullptr;
+    auto filledStar = star ? loadCardLogo("Assets/star_full.png", 22, 22) : nullptr;
     const int width = 480, pad = 40, inner = width - 2 * pad;
     const bool hasIcon = !iconPath.empty();
     const int messageWidth = hasIcon ? inner - 112 : inner;
@@ -728,6 +740,36 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
 
     LinkButton* primary = new LinkButton(width - pad - primaryW, y, primaryW, 30, primaryText, true);
     primary->callback(trampoline, bindings.add(accept));
+    if (star) {
+        // align the star control with the bottom action row
+        class StarButton : public HoverButton {
+        public:
+            using HoverButton::HoverButton;
+            void draw() override { draw_label(); }
+        };
+        auto* toggle = new StarButton(pad, y, 40, 30);
+        toggle->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
+        auto* error = new Fl_Box(pad + 44, y, 220, 30);
+        error->labelsize(13);
+        error->labelcolor(accentColor());
+        error->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
+        auto refreshStar = [&, toggle] {
+            auto* image = star->starred ? filledStar.get() : emptyStar.get();
+            toggle->image(image);
+            toggle->copy_label(image ? nullptr : (star->starred ? "★" : "☆"));
+            toggle->labelcolor(star->starred ? accentColor() : mutedColor());
+            toggle->tooltip(star->starred ? "Unstar card" : "Star card");
+            dialog.redraw();
+        };
+        refreshStar();
+        toggle->callback(trampoline, bindings.add([star, error, refreshStar] {
+            bool saved = false;
+            try { saved = star->save(!star->starred); } catch (const std::exception&) {}
+            error->copy_label(saved ? "" : "Could not save the star. Try again.");
+            if (saved) star->starred = !star->starred;
+            refreshStar();
+        }));
+    }
     if (twoButtons) {
         LinkButton* secondary = new LinkButton(width - pad - primaryW - 28 - secondaryW, y,
                                                secondaryW, 30, secondaryText, false);
@@ -748,9 +790,11 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
 void runDialog(const Menu& menu) {
     const int width = 480, pad = 40, inner = width - 2 * pad, rowH = 56;
     const int rows = static_cast<int>(menu.itemCount());
-    const int height = 32 + 16 + 40 + 36 + rows * rowH + 40 + 30 + 36;
+    const int visibleRows = std::min(rows, 7);
+    const int height = 32 + 16 + 40 + 36 + visibleRows * rowH + 40 + 30 + 36;
 
     BindingList bindings;
+    std::unique_ptr<Fl_Image> filledStar;
     DialogWindow dialog(width, height);
     dialog.copy_label(menu.title().c_str());
     dialog.color(bgColor());
@@ -759,20 +803,32 @@ void runDialog(const Menu& menu) {
 
     new Text(pad, 32, inner, 24, upper(menu.title()), 12, dimColor(), 4);
     new Text(pad, 68, inner, 44, menu.title(), 30, textColor());
-    int y = 68 + 44 + 24;
+    const int rowsTop = 68 + 44 + 24;
+    int y = rowsTop;
+    Fl_Scroll* scroll = nullptr;
+    if (rows > visibleRows) {
+        scroll = new Fl_Scroll(pad, rowsTop, inner + 10, visibleRows * rowH);
+        scroll->type(Fl_Scroll::VERTICAL);
+        scroll->scrollbar_size(10);
+    }
     for (int i = 0; i < rows; ++i) {
         std::string label = menu.itemLabel(static_cast<std::size_t>(i));
         Row* row = new Row(pad, y, inner, rowH, label, i == 0);
+        if (menu.itemStarred(static_cast<std::size_t>(i))) {
+            if (!filledStar) filledStar = loadCardLogo("Assets/star_full.png", 18, 18);
+            row->image(filledStar.get());
+        }
         const Menu* owner = &menu;
         row->callback(trampoline, bindings.add([owner, i] {
             owner->invoke(static_cast<std::size_t>(i));
         }));
         y += rowH;
     }
+    if (scroll) scroll->end();
     Fl_Window* win = &dialog;
     fl_font(FL_HELVETICA, 15);
     const int backW = static_cast<int>(fl_width(menu.exitLabel().c_str())) + 44;
-    LinkButton* back = new LinkButton(pad, y + 36, backW, 30, menu.exitLabel(), false);
+    LinkButton* back = new LinkButton(pad, rowsTop + visibleRows * rowH + 36, backW, 30, menu.exitLabel(), false);
     back->callback(trampoline, bindings.add([win] { win->hide(); }));
 
     dialog.end();
@@ -1159,6 +1215,12 @@ void showMessage(const std::string& text, const std::string& iconPath) {
     prompt(Kind::Message, text, nullptr, "", false, false, false, false, iconPath);
 }
 
+void showCardDetails(const std::string& text, const std::string& iconPath,
+                     bool starred, const std::function<bool(bool)>& saveStar) {
+    CardStarControl star{starred, saveStar};
+    prompt(Kind::Message, text, nullptr, "", false, false, false, false, iconPath, &star);
+}
+
 const char* cardNetworkIcon(std::string_view digits) {
     const char* icon = cardNetworkAsset(cardNetwork(digits));
     return icon ? icon : "";
@@ -1201,8 +1263,8 @@ bool askHidden(const std::string& promptText, std::string& out, bool allowReveal
 Menu::Menu(std::string title, std::string exitLabel)
     : title_(std::move(title)), exitLabel_(std::move(exitLabel)) {}
 
-void Menu::add(const std::string& label, Action action) {
-    items_.push_back({label, std::move(action), nullptr});
+void Menu::add(const std::string& label, Action action, bool starred) {
+    items_.push_back({label, std::move(action), nullptr, starred});
 }
 
 void Menu::addSubmenu(const std::string& label, Menu submenu) {

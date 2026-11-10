@@ -29,6 +29,7 @@ struct CardSummary {
     std::string holder;   // name printed on the card (may be empty)
     std::string expiry;   // "MM/YY"
     std::string masked;   // "**** **** **** 1111"
+    bool starred;
     bool expired;         // true once the month on the card has passed
 };
 
@@ -70,6 +71,7 @@ public:
     // saving fails (in which case the change is undone first).
     AddResult add(std::string_view label, std::string_view holder,
                   std::string_view numberText, std::string_view expiryText);
+    bool setStarred(std::string_view label, bool starred);
     bool remove(std::string_view label);                // false if there is no such card
     std::vector<CardSummary> list() const;              // masked only
     // The full number as digits in groups of four ("4111 1111 1111 1111"), or nothing if
@@ -93,6 +95,7 @@ private:
     struct Card {
         std::string label, holder, expiry;
         security::SecretBytes number;  // digits only
+        bool starred = false;
     };
 
     void save() const;

@@ -142,6 +142,9 @@ static void testWallet(const fs::path& root) {
     check(r.wallet.remove("spare") && r.wallet.size() == 3, "remove (case-insensitive)");
     check(!r.wallet.remove("Spare"), "remove unknown is false");
 
+    check(r.wallet.setStarred("Everyday", true), "star a saved card");
+    check(r.wallet.list()[0].label == "Everyday" && r.wallet.list()[0].starred, "starred cards appear first");
+
     // Persistence across a complete restart: lock, brand-new objects, unlock with the password.
     r.wallet.lock();
     check(!r.wallet.loaded() && r.wallet.size() == 0, "lock forgets the cards");
@@ -152,7 +155,11 @@ static void testWallet(const fs::path& root) {
     check(!again.keys.unlock("Wrong-password-entirely!"), "wrong password");
     check(again.keys.unlock(kPassword) && again.wallet.load() == LoadResult::Ok, "right password loads");
     const auto back = again.wallet.list();
-    check(back.size() == 3 && back[1].label == "Everyday" && back[1].expiry == "01/31", "cards survive a restart");
+    check(back.size() == 3 && back[0].label == "Everyday" && back[0].expiry == "01/31", "cards survive a restart");
+    check(back[0].starred && !back[1].starred, "star preference survives a restart");
+    check(again.wallet.setStarred("Everyday", false), "unstar a saved card");
+    check(again.wallet.load() == LoadResult::Ok && again.wallet.list()[0].label == "Travel Visa" &&
+          !again.wallet.list()[1].starred, "unstar persists and restores insertion order");
     check(again.wallet.revealNumber("Everyday")->view() == "5555 5555 5555 4444", "second number survives a restart");
     check(again.wallet.revealNumber("Travel Visa")->view() == "4111 1111 1111 1111", "number intact after restart");
 }
@@ -206,7 +213,9 @@ static void testTamper(const fs::path& root) {
     const std::string magic = "DWCARDS1";
     const std::string visaCard = field("A") + field("") + field("4111111111111111") + field("12/29");
     const std::pair<const char*, std::string> bad[] = {
-        {"wrong magic", "DWCARDS2" + u32(0)},
+        {"wrong magic", "DWCARDS3" + u32(0)},
+        {"missing star flag", "DWCARDS2" + u32(1) + visaCard},
+        {"invalid star flag", "DWCARDS2" + u32(1) + visaCard + char(2)},
         {"count too big", magic + u32(501)},
         {"count larger than data", magic + u32(2) + visaCard},
         {"truncated field", magic + u32(1) + u32(1) + "A" + u32(0) + u32(16)},

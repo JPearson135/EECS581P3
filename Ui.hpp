@@ -17,6 +17,8 @@ void init();
 void setIdleLock(int seconds, std::function<void()> onIdle);
 void clearIdleLock();
 void showMessage(const std::string& text, const std::string& iconPath = "");
+void showCardDetails(const std::string& text, const std::string& iconPath,
+                     bool starred, const std::function<bool(bool)>& saveStar);
 const char* cardNetworkIcon(std::string_view digits);
 void showSecret(const std::string& description, const std::string& secret,
                 const std::string& iconPath = "");
@@ -30,7 +32,7 @@ public:
     using Action = std::function<void()>;
     explicit Menu(std::string title, std::string exitLabel = "Back");
 
-    void add(const std::string& label, Action action);
+    void add(const std::string& label, Action action, bool starred = false);
     void addSubmenu(const std::string& label, Menu submenu);
     void setWelcome(const std::string& text);
     void run() const;
@@ -40,6 +42,7 @@ public:
     const std::string& welcome() const { return welcome_; }
     std::size_t itemCount() const { return items_.size(); }
     const std::string& itemLabel(std::size_t i) const { return items_[i].label; }
+    bool itemStarred(std::size_t i) const { return items_[i].starred; }
     const Menu* itemSubmenu(std::size_t i) const { return items_[i].submenu.get(); }
     void invoke(std::size_t i) const;
 
@@ -48,6 +51,7 @@ private:
         std::string label;
         Action action;
         std::shared_ptr<Menu> submenu;
+        bool starred = false;
     };
     std::string title_;
     std::string exitLabel_;
