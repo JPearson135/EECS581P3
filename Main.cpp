@@ -159,8 +159,11 @@ int main() {
                 ui::placeholderMenu("Password Manager",
                     {"Add entry", "View entries", "Edit or delete entry", "Search entries",
                      "Generate a password", "Check password strength"}));
-            root.addSubmenu("Authenticator",
-                ui::placeholderMenu("Authenticator", {"Add account", "Show codes", "Delete account"}));
+            ui::Menu authenticatorMenu("Authenticator");
+            authenticatorMenu.add("Add account", ui::addAuthenticatorAccountForm);
+            authenticatorMenu.add("Show codes", [] { ui::notImplemented("Showing authenticator codes"); });
+            authenticatorMenu.add("Delete account", [] { ui::notImplemented("Deleting authenticator accounts"); });
+            root.addSubmenu("Authenticator", authenticatorMenu);
             root.addSubmenu("Wallet", ui::walletMenu(cards));
             root.addSubmenu("Backup", backupMenu(backups, cards));
             root.addSubmenu("Security", securityMenu(lockRequested));

@@ -1015,6 +1015,63 @@ void addCardForm(const CardSubmit& submit) {
     fields[2]->value("");
 }
 
+void addAuthenticatorAccountForm() {
+    Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
+    Fl_PNG_Image visibleSource("visible", visibleIcon, sizeof(visibleIcon));
+    std::unique_ptr<Fl_Image> hidden = makeIcon(hiddenSource, 96);
+    std::unique_ptr<Fl_Image> visible = makeIcon(visibleSource, 104);
+    BindingList bindings;
+    DialogWindow dialog(540, 430);
+    dialog.copy_label("Add authenticator account");
+    dialog.color(bgColor());
+    dialog.set_modal();
+    new Text(40, 28, 460, 36, "Add authenticator account", 26, textColor());
+
+    new Text(40, 88, 460, 24, "Website", 15, mutedColor());
+    auto* website = new Field<Fl_Input>(40, 116, 460, 34);
+    new Text(40, 166, 460, 24, "Username", 15, mutedColor());
+    auto* username = new Field<Fl_Input>(40, 194, 460, 34);
+    new Text(40, 244, 400, 24, "Base32 secret", 15, mutedColor());
+    auto* secret = new Field<Fl_Secret_Input>(40, 272, 408, 34);
+
+    auto* eye = new EyeButton(456, 267, 44, 44);
+    eye->insideField = true;
+    eye->inputOwner = secret;
+    eye->color(bgColor());
+    eye->image(visible.get());
+    eye->tooltip("Show Base32 secret");
+    eye->callback(trampoline, bindings.add([secret, eye, &hidden, &visible] {
+        const bool reveal = (secret->type() & FL_INPUT_TYPE) == FL_SECRET_INPUT;
+        secret->type(reveal ? FL_NORMAL_INPUT : FL_SECRET_INPUT);
+        eye->image(reveal ? hidden.get() : visible.get());
+        eye->tooltip(reveal ? "Hide Base32 secret" : "Show Base32 secret");
+        secret->redraw();
+        eye->redraw();
+    }));
+
+    auto close = [&] {
+        secret->value("");
+        dialog.hide();
+    };
+    auto add = [&] {
+        (void)website;
+        (void)username;
+        close();
+        notImplemented("Saving authenticator accounts");
+    };
+    auto* cancel = new LinkButton(240, 372, 80, 30, "Cancel", false);
+    cancel->callback(trampoline, bindings.add(close));
+    auto* addButton = new LinkButton(350, 372, 150, 30, "Add account", true);
+    addButton->callback(trampoline, bindings.add(add));
+    dialog.onEnter = add;
+    dialog.end();
+    centre(dialog);
+    dialog.show();
+    website->take_focus();
+    while (dialog.shown()) Fl::wait();
+    secret->value("");
+}
+
 // first-time setup with both password fields on the same screen
 bool createPasswordScreen(const std::string& rules,
         const std::function<std::string(const std::string&, const std::string&)>& submit) {

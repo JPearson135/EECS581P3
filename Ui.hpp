@@ -11,6 +11,7 @@ struct CardFormError { int field = 0; std::string message; };
 using CardSubmit = std::function<CardFormError(const std::string&, const std::string&, const std::string&, const std::string&)>;
 std::string expiryProblem(const std::string& expiry);
 void addCardForm(const CardSubmit& submit);
+void addAuthenticatorAccountForm();
 bool createPasswordScreen(const std::string& rules, const std::function<std::string(const std::string&, const std::string&)>& submit);
 bool unlockScreen(const std::function<bool(const std::string&)>& unlock);
 void init();
