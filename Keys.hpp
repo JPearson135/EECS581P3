@@ -37,6 +37,9 @@ public:
     // and a changed or damaged vault.meta all look the same (false): no details leak.
     bool unlock(std::string_view password);
 
+    // Unlocks against authenticated metadata supplied by a verified backup bundle.
+    bool unlockWithMetadata(std::string_view password, const storage::Bytes& metadata);
+
     // Wipes the master key from memory.
     void lock();
     bool unlocked() const { return !master_.empty(); }

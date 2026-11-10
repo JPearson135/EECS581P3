@@ -122,6 +122,24 @@ bool SecureFileStore::writeNew(const std::string& name, const Bytes& data) {
     return save(name, data, false);
 }
 
+bool SecureFileStore::remove(const std::string& name) {
+    if (!validName(name)) throw std::runtime_error("Bad file name");
+    const auto path = dir_ / name;
+    struct stat st{};
+    if (::lstat(path.c_str(), &st) != 0) {
+        if (errno == ENOENT) return false;
+        throw std::runtime_error("Cannot check file");
+    }
+    if (!S_ISREG(st.st_mode) || !ownerOnly(st))
+        throw std::runtime_error("File is unsafe");
+    if (::unlink(path.c_str()) != 0) {
+        if (errno == ENOENT) return false;
+        throw std::runtime_error("Cannot remove file");
+    }
+    syncDirectory(dir_);
+    return true;
+}
+
 bool SecureFileStore::save(const std::string& name, const Bytes& data, bool replace) {
     if (!validName(name)) throw std::runtime_error("Bad file name");
     if (data.size() > kMaxFileSize) throw std::runtime_error("File is too large");

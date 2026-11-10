@@ -120,6 +120,15 @@ Bytes randomBytes(std::size_t count) {
     return out;
 }
 
+Bytes sha256(const Bytes& data) {
+    Bytes digest(32);
+    unsigned int length = 0;
+    if (EVP_Digest(data.data(), data.size(), digest.data(), &length, EVP_sha256(), nullptr) != 1 ||
+        length != digest.size())
+        throw std::runtime_error("SHA-256 failed");
+    return digest;
+}
+
 
 // scrypt = the SLOW password-to-key step (the KDF for passwords)
 // It's deliberatly expensive in time AND memory, so guessing passwords is costly. Returns a 32-byte key (the "master key")

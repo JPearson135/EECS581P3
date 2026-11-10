@@ -54,6 +54,9 @@ public:
     // Same as write(), but never replaces an existing file, returns false if it exists.
     bool writeNew(const std::string& name, const Bytes& data);
 
+    // Removes an existing regular owner-only file. Returns false if it does not exist.
+    bool remove(const std::string& name);
+
 private:
     bool save(const std::string& name, const Bytes& data, bool replace);
 

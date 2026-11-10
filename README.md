@@ -85,6 +85,7 @@ down why in the documentation file.
 | `make test` | Master-password rule tests (`Tests/test_main.cpp`) |
 | `make test-security` | Tests for encryption, key handling, file storage and the one-copy lock. Does not need FLTK. |
 | `make test-wallet` | Tests for the bank card wallet. Does not need FLTK. |
+| `make test-backup` | Tests for secure backup creation, validation and restoration. Does not need FLTK. |
 | `make test-all` | All of the above |
 | `make debug` | Builds `DigiWallet_debug` with memory-error checking turned on |
 | `make clean` | Deletes everything the build created, but keeps saved wallet data |
@@ -112,6 +113,8 @@ Good to know:
   The program now refuses a folder that is not private. If you see "Data folder is not private", run
   `chmod 700 ~/.digiwallet`. Or, if you do not need the old data, run `rm -rf ~/.digiwallet` and start fresh.
   The old `master.verifier` file is no longer used and can be deleted.
-- No password recovery exists. Change master password, auto-lock and backup are not built yet.
+- **Backup recovery:** enter the master password that was used when the backup was created. This also works
+   after `make wipe` or on a new installation; after restoring, use that original password to unlock the vault.
+- No password reset or auto-lock setting exists.
 
 The reasons behind each choice are in the documentation file (`DigiWallet_Security_Foundation_Guide.docx`).

@@ -155,11 +155,19 @@ bool KeyManager::unlock(std::string_view password) {
     lock();
     try {
         if (password.empty()) return false;
-        const auto file = store_.read(kMetaFileName); // read vault.meta and split it into 5 lines, extra or missing lines are rejected
-        if (!file) return false;
+        const auto metadata = store_.read(kMetaFileName);
+        return metadata && unlockWithMetadata(password, *metadata);
+    } catch (const std::exception&) {
+        lock();
+        return false;
+    }
+}
 
-        // Read the five lines exactly. Anything unexpected is treated as "no".
-        std::istringstream in(std::string(file->begin(), file->end()));
+bool KeyManager::unlockWithMetadata(std::string_view password, const storage::Bytes& metadata) {
+    lock();
+    try {
+        if (password.empty() || metadata.size() > 4096) return false;
+        std::istringstream in(std::string(metadata.begin(), metadata.end()));
         std::string magic, kdf, costs, saltHex, checkHex, extra;
         if (!std::getline(in, magic) || !std::getline(in, kdf) || !std::getline(in, costs) ||
             !std::getline(in, saltHex) || !std::getline(in, checkHex) ||
@@ -199,7 +207,6 @@ bool KeyManager::unlock(std::string_view password) {
         master_ = std::move(master);
         return true;
 
-    // Any unexpected error also means "no", and we make sure nothing stays unlocked
     } catch (const std::exception&) {
         lock();
         return false;

@@ -69,6 +69,9 @@ struct ScryptParams {
 // Cryptographically secure random bytes. Throws if the system cannot provide them.
 Bytes randomBytes(std::size_t count);
 
+// SHA-256 digest for integrity manifests and other non-secret data.
+Bytes sha256(const Bytes& data);
+
 // Slow, memory-hard password -> 32-byte key. Throws on failure.
 SecretBytes scrypt(std::string_view password, const Bytes& salt, const ScryptParams& params);
 
