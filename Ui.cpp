@@ -292,6 +292,26 @@ private:
     bool hovering_ = false;
 };
 
+// the wordmark doubles as the link back to the welcome page
+class HomeWordmark : public HoverButton {
+public:
+    HomeWordmark(int x, int y, const std::string& title)
+        : HoverButton(x, y, 140, 28) {
+        copy_label(title.c_str());
+        tooltip("Go to Home");
+    }
+
+    void draw() override {
+        fl_color(bgColor());
+        fl_rectf(x(), y(), w(), h());
+        fl_color(accentColor());
+        fl_pie(x(), y() + h() / 2 - 3, 7, 7, 0, 360);
+        fl_color(hovering() || Fl::focus() == this ? accentColor() : textColor());
+        fl_font(FL_HELVETICA_BOLD, scaledText(*this, 12));
+        drawSpaced(label(), x() + 18, y(), h(), scaledText(*this, 4));
+    }
+};
+
 // shared eye button for showing and hiding sensitive text
 class EyeButton : public Fl_Button {
 public:
@@ -1213,9 +1233,7 @@ void Menu::run() const {
     window.color(bgColor());
 
     // Header: logo on the left, navigation on the right, hairline underneath.
-    new Dot(kMargin, kHeaderH / 2 - 3);
-    new Text(kMargin + 18, kHeaderH / 2 - 12, 220, 24, upper(title_), 12, textColor(), 4,
-             FL_HELVETICA_BOLD);
+    auto* homeButton = new HomeWordmark(kMargin, kHeaderH / 2 - 14, upper(title_));
     new Line(0, kHeaderH, kWinW);
 
     // Pages. Page 0 is Home; each submenu gets its own scrolling page.
@@ -1272,10 +1290,11 @@ void Menu::run() const {
         pages.push_back(page);
     }
 
+    navButtons.resize(pages.size(), nullptr);
     auto showPage = [&pages, &navButtons, &window](int index) {
         for (std::size_t p = 0; p < pages.size(); ++p) {
             if (static_cast<int>(p) == index) pages[p]->show(); else pages[p]->hide();
-            if (p < navButtons.size()) navButtons[p]->setSelected(static_cast<int>(p) == index);
+            if (navButtons[p]) navButtons[p]->setSelected(static_cast<int>(p) == index);
         }
         window.redraw();
     };
@@ -1283,7 +1302,7 @@ void Menu::run() const {
     // Navigation, laid out right to left so it hugs the right margin.
     struct NavSpec { std::string label; int page; int action; };
     std::vector<NavSpec> specs;
-    specs.push_back({"Home", 0, -1});
+    homeButton->callback(trampoline, bindings.add([showPage] { showPage(0); }));
     for (std::size_t i = 0; i < itemCount(); ++i) {
         if (pageOfItem[i] >= 0) specs.push_back({itemLabel(i), pageOfItem[i], -1});
         else                    specs.push_back({itemLabel(i), -1, static_cast<int>(i)});
@@ -1306,7 +1325,7 @@ void Menu::run() const {
         if (s.page >= 0) {
             const int target = s.page;
             button->callback(trampoline, bindings.add([showPage, target] { showPage(target); }));
-            navButtons.push_back(button);
+            navButtons[target] = button;
         } else if (s.action == -2) {
             button->callback(trampoline, bindings.add([windowPtr] { windowPtr->hide(); }));
         } else {
