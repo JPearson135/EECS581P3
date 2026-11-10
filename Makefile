@@ -26,7 +26,8 @@ endif
 TARGET       = $(APP_NAME)$(EXE)
 DEBUG_TARGET = $(APP_NAME)_debug$(EXE)
 
-ifneq ($(MAKECMDGOALS),clean)
+NO_FLTK_GOALS = clean clean-build test-security test-wallet test-backup
+ifneq ($(filter-out $(NO_FLTK_GOALS),$(if $(MAKECMDGOALS),$(MAKECMDGOALS),all)),)
   ifeq ($(shell command -v $(FLTK_CONFIG) 2>/dev/null),)
     $(error FLTK was not found. Install it first: see "Build and run" in README.md)
   endif
@@ -48,7 +49,7 @@ DEPS      = $(OBJS:.o=.d)
 LIB_OBJS  = $(filter-out $(BUILD_DIR)/Main.o,$(OBJS))
 PREFIX   ?= $(HOME)/.local
 
-.PHONY: all build run app debug test test-security test-wallet test-all check-deps clean clean-build wipe install
+.PHONY: all build run app debug test test-security test-wallet test-backup test-all check-deps clean clean-build wipe install
 
 all: build
 
@@ -116,6 +117,7 @@ endif
 #   ./obj/test_security --slow
 SECURITY_OBJS = $(BUILD_DIR)/Crypto.o $(BUILD_DIR)/Keys.o $(BUILD_DIR)/Storage.o
 WALLET_OBJS   = $(SECURITY_OBJS) $(BUILD_DIR)/Wallet.o
+BACKUP_OBJS   = $(SECURITY_OBJS) $(BUILD_DIR)/Backup.o
 
 test-security: $(BUILD_DIR)/test_security$(EXE)
 	./$(BUILD_DIR)/test_security$(EXE)
@@ -129,7 +131,13 @@ test-wallet: $(BUILD_DIR)/test_wallet$(EXE)
 $(BUILD_DIR)/test_wallet$(EXE): Tests/test_wallet.cpp $(WALLET_OBJS) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ Tests/test_wallet.cpp $(WALLET_OBJS) $(LDFLAGS) $(LDLIBS)
 
-test-all: test-security test-wallet test
+test-backup: $(BUILD_DIR)/test_backup$(EXE)
+	./$(BUILD_DIR)/test_backup$(EXE)
+
+$(BUILD_DIR)/test_backup$(EXE): Tests/test_backup.cpp $(BACKUP_OBJS) | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ Tests/test_backup.cpp $(BACKUP_OBJS) $(LDFLAGS) $(LDLIBS)
+
+test-all: test-security test-wallet test-backup test
 
 # Prints what this computer has and fails with a clear message if something is missing or too old.
 check-deps:
