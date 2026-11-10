@@ -35,8 +35,16 @@ struct EntrySummary {
     std::string notes;
 };
  
-// TODO (Req 7): declare the random password generator here (a settings struct for length + which character
-// types, and a generatePassword function that returns a SecretBytes). Implement it in Passwords.cpp.
+struct GenerateOptions {
+    std::size_t length = 16;
+    bool includeLowercase = true;
+    bool includeUppercase = true;
+    bool includeDigits = true;
+    bool includeSymbols = true;
+};
+
+std::optional<security::SecretBytes> generatePassword(const GenerateOptions& options);
+
 class PasswordManager {
 public:
     static constexpr const char* kFileName = "passwords.enc";
