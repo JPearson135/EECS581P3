@@ -14,3 +14,8 @@ vault.meta
 .DS_Store
 __MACOSX/
 *.zip
+# Backups: contain the whole encrypted vault
+*.dwbak
+*.bak
+DigiWallet-Backups/
+backups/
