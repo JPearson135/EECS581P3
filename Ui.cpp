@@ -226,14 +226,14 @@ std::string upper(std::string s) {
 class Text : public Fl_Widget {
 public:
     Text(int x, int y, int w, int h, const std::string& text, int size, Fl_Color color,
-         int spacing = 0, Fl_Font font = FL_HELVETICA)
+                 int spacing = 0, Fl_Font font = FL_HELVETICA, bool scale = true)
         : Fl_Widget(x, y, w, h), text_(text), size_(size), color_(color), spacing_(spacing),
-          font_(font) {}
+                    font_(font), scale_(scale) {}
     void draw() override {
-        fl_font(font_, scaledText(*this, size_));
+                fl_font(font_, scale_ ? scaledText(*this, size_) : size_);
         fl_color(color_);
         if (spacing_ > 0) {
-            drawSpaced(text_, x(), y(), h(), scaledText(*this, spacing_));
+                        drawSpaced(text_, x(), y(), h(), scale_ ? scaledText(*this, spacing_) : spacing_);
         } else {
             fl_draw(text_.c_str(), x(), y(), w(), h(),
                     FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_WRAP, nullptr, 0);
@@ -245,6 +245,7 @@ private:
     Fl_Color color_;
     int spacing_;
     Fl_Font font_;
+    bool scale_;
 };
 
 // Height needed to show `text` wrapped to `width` at `size`.
@@ -705,9 +706,11 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
             toggle->color(bgColor());
             toggle->image(visibleDisplay.get());
             toggle->tooltip("Show text");
-            toggle->callback(trampoline, bindings.add([field, toggle, &hiddenDisplay, &visibleDisplay] {
-                const bool reveal = field->type() == FL_SECRET_INPUT;
+            toggle->callback(trampoline, bindings.add([field, toggle, &hiddenDisplay, &visibleDisplay,
+                                                       readOnly] {
+                const bool reveal = (field->type() & FL_INPUT_TYPE) == FL_SECRET_INPUT;
                 field->type(reveal ? FL_NORMAL_INPUT : FL_SECRET_INPUT);
+                field->readonly(readOnly);
                 toggle->image(reveal ? hiddenDisplay.get() : visibleDisplay.get());
                 toggle->tooltip(reveal ? "Hide text" : "Show text");
                 field->redraw();
@@ -1299,9 +1302,21 @@ void Menu::run() const {
     new Line(0, kHeaderH, kWinW);
 
     // Pages. Page 0 is Home; each submenu gets its own scrolling page.
-    Fl_Group* home = new Fl_Group(0, kHeaderH + 1, kWinW, kWinH - kHeaderH - 1);
+    const int footerTop = kWinH - 76;
+    Fl_Group* homePage = new Fl_Group(0, kHeaderH + 1, kWinW, kWinH - kHeaderH - 1);
+    homePage->box(FL_FLAT_BOX);
+    homePage->color(bgColor());
+    homePage->begin();
+    Fl_Scroll* home = new Fl_Scroll(0, kHeaderH + 1, kWinW, footerTop - kHeaderH - 1);
     home->box(FL_FLAT_BOX);
     home->color(bgColor());
+    home->type(Fl_Scroll::VERTICAL);
+    home->scrollbar_size(10);
+    home->scrollbar.box(FL_FLAT_BOX);
+    home->scrollbar.color(bgColor());
+    home->scrollbar.selection_color(lineColor());
+    home->scrollbar.slider(FL_FLAT_BOX);
+    home->begin();
     {
         std::string text = welcome_.empty() ? "Choose a section above to get started." : welcome_;
         std::string first = text, rest;
@@ -1310,18 +1325,29 @@ void Menu::run() const {
             first = text.substr(0, split);
             rest = text.substr(split + 2);
         }
-        new Text(kMargin, 150, contentW, 20, "WELCOME", 12, dimColor(), 4);
+        new Text(kMargin, 150, contentW, 20, "WELCOME", 12, dimColor(), 4,
+                 FL_HELVETICA, false);
         const int headW = 620;
         const int headH = textHeight(first, headW, 40) + 6;
-        new Text(kMargin, 190, headW, headH, first, 40, textColor());
-        if (!rest.empty())
-            new Text(kMargin, 190 + headH + 28, 460, 120, rest, 16, mutedColor());
-        new Line(0, kWinH - 76, kWinW);
-        new Dot(kMargin, kWinH - 41);
-        new Text(kMargin + 18, kWinH - 48, 300, 20, "Vault unlocked", 13, dimColor());
+        new Text(kMargin, 190, headW, headH, first, 40, textColor(), 0,
+                 FL_HELVETICA, false);
+        int contentBottom = 190 + headH;
+        if (!rest.empty()) {
+            const int restH = textHeight(rest, 460, 16) + 4;
+            new Text(kMargin, contentBottom + 28, 460, restH, rest, 16, mutedColor(), 0,
+                     FL_HELVETICA, false);
+            contentBottom += 28 + restH;
+        }
+        new Fl_Box(kMargin, contentBottom + 24, 1, 1);
     }
     home->end();
-    pages.push_back(home);
+    new Line(0, footerTop, kWinW);
+    new Dot(kMargin, footerTop + 35);
+    new Text(kMargin + 18, footerTop + 28, 300, 20, "Vault unlocked", 13, dimColor(), 0,
+             FL_HELVETICA, false);
+    homePage->end();
+    homePage->resizable(home);
+    pages.push_back(homePage);
 
     std::vector<int> pageOfItem(itemCount(), -1);
     for (std::size_t i = 0; i < itemCount(); ++i) {
@@ -1399,7 +1425,7 @@ void Menu::run() const {
 
     window.end();
     // allow resizing and native fullscreen while keeping the minimum usable size
-    window.resizable(window);
+    window.resizable(homePage);
     window.size_range(kWinW, kWinH);
     showPage(0);
     centre(window);

@@ -16,6 +16,7 @@ __MACOSX/
 *.zip
 # Backups: contain the whole encrypted vault
 *.dwbak
+*.dwbak.tmp.*
 *.bak
 DigiWallet-Backups/
 backups/

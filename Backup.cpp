@@ -280,8 +280,10 @@ bool BackupService::replaceFiles(const std::vector<Entry>& files) {
     }
 }
 
-CreateResult BackupService::create(const std::filesystem::path& destination) {
+CreateResult BackupService::create(const std::filesystem::path& requested) {
     if (!keys_.unlocked()) return CreateResult::Locked;
+    std::filesystem::path destination = requested;
+    if (destination.extension() != ".dwbak") destination += ".dwbak";
     try {
         const std::vector<Entry> files = collectFiles();
         const bool hasVaultMeta = std::any_of(files.begin(), files.end(), [](const Entry& file) {

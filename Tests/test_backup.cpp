@@ -53,10 +53,11 @@ static void testBackup(const fs::path& root) {
 
     Rig rig(root / "vault");
     const std::string password = "Correct-horse-battery-staple!";
-    const fs::path backupPath = root / "vault.backup";
-    check(rig.backups.create(backupPath) == backup::CreateResult::Locked,
+        const fs::path requestedBackupPath = root / "vault.backup";
+        const fs::path backupPath = root / "vault.backup.dwbak";
+        check(rig.backups.create(requestedBackupPath) == backup::CreateResult::Locked,
           "create requires an unlocked vault");
-    check(rig.backups.restore(backupPath) == backup::RestoreResult::Locked,
+        check(rig.backups.restore(requestedBackupPath) == backup::RestoreResult::Locked,
           "restore requires an unlocked vault");
 
     rig.keys.createVault(password);
@@ -67,8 +68,13 @@ static void testBackup(const fs::path& root) {
     rig.store.write("cards.enc", oldCards);
     rig.store.write("passwords.enc", oldPasswords);
     const storage::Bytes originalMeta = *rig.store.read("vault.meta");
-    check(rig.backups.create(backupPath) == backup::CreateResult::Ok,
+        check(rig.backups.create(requestedBackupPath) == backup::CreateResult::Ok,
           "create writes a backup");
+        check(fs::exists(backupPath), "create appends the .dwbak extension");
+        check(rig.backups.create(backupPath) == backup::CreateResult::Ok,
+            "create accepts an existing .dwbak extension");
+        check(!fs::exists(backupPath.string() + ".dwbak"),
+            "create does not duplicate the .dwbak extension");
 
     struct stat fileStat{};
     check(::stat(backupPath.c_str(), &fileStat) == 0 && (fileStat.st_mode & 0777) == 0600,
