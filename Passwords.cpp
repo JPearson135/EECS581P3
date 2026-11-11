@@ -23,7 +23,7 @@ bool hasControlChar(std::string_view text) {
 char lower(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
  
 // Case-insensitive comparison (used for site names and usernames).
-[[maybe_unused]] bool sameText(std::string_view a, std::string_view b) {  // TODO: remove [[maybe_unused]] once indexOf() uses it
+bool sameText(std::string_view a, std::string_view b) {
     if (a.size() != b.size()) return false;
     for (std::size_t i = 0; i < a.size(); ++i)
         if (lower(a[i]) != lower(b[i])) return false;
@@ -123,8 +123,49 @@ security::SecretBytes PasswordManager::serialize() const {
 //   check magic + count (<= kMaxEntries), read the 4 length-prefixed fields per entry with Reader,
 //   re-check with valid*(), reject duplicate site+username and leftover bytes. All or nothing.
 std::optional<std::vector<PasswordManager::Entry>> PasswordManager::parse(const security::SecretBytes& plain) {
-    (void)plain;
-    return std::nullopt;
+    Reader in{plain.data(), plain.size()};
+    const unsigned char* magic = nullptr;
+    std::size_t count = 0;
+
+    // Check the 8-letter tag, then the entry count (capped at kMaxEntries).
+    if (!in.bytes(kMagicSize, magic)) return std::nullopt;
+    if (!std::equal(magic, magic + kMagicSize, reinterpret_cast<const unsigned char*>(kMagic)) ||
+        !in.u32(count) || count > kMaxEntries)
+        return std::nullopt;
+
+    std::vector<Entry> entries;
+    entries.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+
+        // Read the four length-prefixed fields (site, username, password, notes).
+        const unsigned char* field[4] = {};
+        std::size_t length[4] = {};
+        for (int f = 0; f < 4; ++f)
+            if (!in.u32(length[f]) || !in.bytes(length[f], field[f])) return std::nullopt;
+
+        Entry entry;
+        entry.site.assign(reinterpret_cast<const char*>(field[0]), length[0]);
+        entry.username.assign(reinterpret_cast<const char*>(field[1]), length[1]);
+        entry.notes.assign(reinterpret_cast<const char*>(field[3]), length[3]);
+        security::SecretBytes password(field[2], length[2]);
+
+        // Re-validate everything exactly like add() would.
+        if (!validSite(entry.site) || !validUsername(entry.username) || !validNotes(entry.notes) ||
+            !validPassword(std::string_view(reinterpret_cast<const char*>(field[2]), length[2])))
+            return std::nullopt;
+
+        // No two entries may share the same site AND username.
+        for (const Entry& other : entries)
+            if (sameText(other.site, entry.site) && sameText(other.username, entry.username))
+                return std::nullopt;
+
+        entry.password = std::move(password);
+        entries.push_back(std::move(entry));
+    }
+
+    // Bytes left over after the last entry means this is not a file we wrote.
+    if (in.pos != plain.size()) return std::nullopt;
+    return entries;
 }
 
 // ------------------------------------------------------------------ the manager
@@ -138,17 +179,23 @@ LoadResult PasswordManager::load() {
     return LoadResult::Locked;
 }
 
-// TODO (Req 3): lock() - clear entries_ (passwords wipe themselves) and set loaded_ = false.
+// lock() - clear entries_ (passwords wipe themselves) and set loaded_ = false.
 void PasswordManager::lock() {
+    entries_.clear();
+    loaded_ = false;
 }
 
-// TODO (Req 5): save() - serialize() -> keys_.encryptFile(kFileName, ...) -> store_.write(kFileName, ...).
+// save() - serialize() -> keys_.encryptFile(kFileName, ...) -> store_.write(kFileName, ...).
 void PasswordManager::save() const {
+    security::SecretBytes plain = serialize();
+    store_.write(kFileName, keys_.encryptFile(kFileName, plain));
 }
 
-// TODO (Req 5/6): indexOf() - position of the entry with this site AND username (use sameText), or -1.
+// Checks for an entry with the same site AND username (ignoring capitals). Returns -1 if not found.
 int PasswordManager::indexOf(std::string_view site, std::string_view username) const {
-    (void)site; (void)username;
+    for (std::size_t i = 0; i < entries_.size(); ++i)
+        if (sameText(entries_[i].site, site) && sameText(entries_[i].username, username))
+            return static_cast<int>(i);
     return -1;
 }
 
