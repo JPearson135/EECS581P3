@@ -154,7 +154,8 @@ int main() {
 
             bool lockRequested = false;
             ui::Menu root("DigiWallet", "Exit");
-            root.setWelcome("Passwords, authenticator codes, and cards in one place.");
+            // wire home to the unlocked wallet and its existing card actions
+            ui::configureWalletHome(root, cards);
             root.addSubmenu("Passwords",
                 ui::placeholderMenu("Password Manager",
                     {"Add entry", "View entries", "Edit or delete entry", "Search entries",

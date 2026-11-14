@@ -24,12 +24,19 @@
 namespace wallet {
 
 // Safe-to-display facts about a card. The full number is NOT in here.
+// network metadata comes from the number prefix and is safe to include in summaries
+enum class CardNetwork { Unknown, Visa, Mastercard, AmericanExpress, Discover };
+// accept partial input for live recognition in the add card form
+CardNetwork cardNetwork(std::string_view digits);
+
 struct CardSummary {
     std::string label;    // nickname, for example "Travel Visa"
     std::string holder;   // name printed on the card (may be empty)
     std::string expiry;   // "MM/YY"
     std::string masked;   // "**** **** **** 1111"
     bool starred;
+    // allows screens to choose a logo without retrieving the full number
+    CardNetwork network;
     bool expired;         // true once the month on the card has passed
 };
 

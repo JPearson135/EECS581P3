@@ -99,27 +99,31 @@ void addCard(wallet::CardWallet& cards) {
     });
 }
 
-void viewCards(wallet::CardWallet& cards) {
+// share the card details flow between the picker and the home dashboard
+void openCard(wallet::CardWallet& cards, const std::string& label) {
     if (!ready(cards)) return;
     guarded([&] {
-        const auto label = pickCard(cards, "View cards");
-        if (!label) return;
-        const auto number = cards.revealNumber(*label);
-        if (!number) return;
-        for (const auto& c : cards.list()) {
-            if (c.label != *label) continue;
+        for (const auto& card : cards.list()) {
+            if (card.label != label) continue;
+            // use the masked summary for the details dialog and star control
+            const char* icon = cardNetworkIcon(card.network);
             const std::string details =
-                c.label + "\n\nName: " + (c.holder.empty() ? "(none)" : c.holder) +
-                "\nNumber: " + c.masked + "\nExpires: " + c.expiry + (c.expired ? "  (expired)" : "");
-            showCardDetails(details, ui::cardNetworkIcon(number->view()), c.starred,
-                            [&](bool starred) { return cards.setStarred(c.label, starred); });
-            break;
+                card.label + "\n\nName: " + (card.holder.empty() ? "(none)" : card.holder) +
+                "\nNumber: " + card.masked + "\nExpires: " + card.expiry +
+                (card.expired ? "  (expired)" : "");
+            showCardDetails(details, icon, card.starred,
+                            [&](bool starred) { return cards.setStarred(label, starred); });
+            // request the full number only when opening the existing masked reveal screen
+            if (const auto number = cards.revealNumber(label))
+                showSecret(label + " — Card number", std::string(number->view()), icon);
+            return;
         }
-
-        // reveal saved card numbers only through the visibility toggle
-        showSecret(*label + " — Card number", std::string(number->view()),
-                   ui::cardNetworkIcon(number->view()));
     });
+}
+
+void viewCards(wallet::CardWallet& cards) {
+    if (!ready(cards)) return;
+    if (const auto label = pickCard(cards, "View cards")) openCard(cards, *label);
 }
 
 void removeCard(wallet::CardWallet& cards) {
@@ -133,6 +137,27 @@ void removeCard(wallet::CardWallet& cards) {
 }
 
 }  // namespace
+
+// build home rows from masked summaries and reuse the wallet actions
+void configureWalletHome(Menu& menu, wallet::CardWallet& cards) {
+    menu.setHomeCards([&cards] {
+        Menu::HomeCards home;
+        // report an unavailable wallet before requesting its summaries
+        home.available = cards.loaded();
+        if (!home.available) return home;
+        const auto summaries = cards.list();
+        // keep the empty wallet state separate from a wallet without starred cards
+        home.hasCards = !summaries.empty();
+        for (const auto& card : summaries) {
+            if (!card.starred) continue;
+            // send only the nickname, last four digits, logo, and a label-based action to home
+            home.favorites.push_back({card.label + "    •••• " + card.masked.substr(card.masked.size() - 4),
+                                      cardNetworkIcon(card.network),
+                                      [&cards, label = card.label] { openCard(cards, label); }});
+        }
+        return home;
+    }, [&cards] { addCard(cards); }, [&cards] { viewCards(cards); });
+}
 
 Menu walletMenu(wallet::CardWallet& cards) {
     Menu menu("Wallet");

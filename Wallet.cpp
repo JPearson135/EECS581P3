@@ -357,14 +357,46 @@ bool CardWallet::remove(std::string_view label) {
 }
 
 // Safe-to-show summaries only (label, name, expiry, masked number, expired flag). The full number is never in here.
+// identify the network from at most four prefix digits
+CardNetwork cardNetwork(std::string_view digits) {
+    // validate the input while keeping only the prefix needed to identify the network
+    std::string_view::size_type count = 0;
+    char compact[4]{};
+    for (char c : digits) {
+        if (c == ' ') continue;
+        if (c < '0' || c > '9') return CardNetwork::Unknown;
+        if (count < sizeof(compact)) compact[count++] = c;
+    }
+    if (count && compact[0] == '4') return CardNetwork::Visa;
+    if (count >= 2) {
+        const int prefix = (compact[0] - '0') * 10 + compact[1] - '0';
+        if (prefix >= 51 && prefix <= 55) return CardNetwork::Mastercard;
+        if (prefix == 34 || prefix == 37) return CardNetwork::AmericanExpress;
+        if (prefix == 65) return CardNetwork::Discover;
+    }
+    if (count >= 3) {
+        const int prefix = (compact[0] - '0') * 100 + (compact[1] - '0') * 10 + compact[2] - '0';
+        if (prefix >= 644 && prefix <= 649) return CardNetwork::Discover;
+    }
+    // check networks with four-digit ranges after the shorter prefixes
+    if (count >= 4) {
+        const int prefix = (compact[0] - '0') * 1000 + (compact[1] - '0') * 100 +
+                           (compact[2] - '0') * 10 + compact[3] - '0';
+        if (prefix >= 2221 && prefix <= 2720) return CardNetwork::Mastercard;
+        if (prefix == 6011) return CardNetwork::Discover;
+    }
+    return CardNetwork::Unknown;
+}
+
 std::vector<CardSummary> CardWallet::list() const {
     if (!loaded_) throw std::runtime_error("Wallet is not loaded");
     std::time_t now = std::time(nullptr);
     std::tm local{};
     localtime_r(&now, &local);
     std::vector<CardSummary> out;
+    // derive the logo metadata here while the full number stays inside the wallet
     for (const Card& c : cards_)
-        out.push_back({c.label, c.holder, c.expiry, mask(c.number), c.starred,
+        out.push_back({c.label, c.holder, c.expiry, mask(c.number), c.starred, cardNetwork(c.number.view()),
                        isExpired(c.expiry, local.tm_year + 1900, local.tm_mon + 1)});
     std::stable_partition(out.begin(), out.end(), [](const CardSummary& card) { return card.starred; });
     return out;

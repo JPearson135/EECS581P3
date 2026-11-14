@@ -6,6 +6,9 @@
 #include <string_view>
 #include <vector>
 
+// forward declare the network type so callers can use this header without including the wallet
+namespace wallet { enum class CardNetwork; }
+
 namespace ui {
 struct CardFormError { int field = 0; std::string message; };
 using CardSubmit = std::function<CardFormError(const std::string&, const std::string&, const std::string&, const std::string&)>;
@@ -20,7 +23,8 @@ void clearIdleLock();
 void showMessage(const std::string& text, const std::string& iconPath = "");
 void showCardDetails(const std::string& text, const std::string& iconPath,
                      bool starred, const std::function<bool(bool)>& saveStar);
-const char* cardNetworkIcon(std::string_view digits);
+// map wallet network metadata to an asset path for display
+const char* cardNetworkIcon(wallet::CardNetwork network);
 void showSecret(const std::string& description, const std::string& secret,
                 const std::string& iconPath = "");
 void notImplemented(const std::string& feature);
@@ -35,6 +39,20 @@ public:
 
     void add(const std::string& label, Action action, bool starred = false);
     void addSubmenu(const std::string& label, Menu submenu);
+    // one home row contains display text, an optional logo, and a card details action
+    struct HomeCard {
+        std::string label;
+        std::string iconPath;
+        Action open;
+    };
+    // distinguish a wallet that failed to load from an empty wallet or one with no favorites
+    struct HomeCards {
+        std::vector<HomeCard> favorites;
+        bool hasCards = false;
+        bool available = false;
+    };
+    // supply a fresh snapshot on each visit along with the two wallet shortcuts
+    void setHomeCards(std::function<HomeCards()> load, Action add, Action view);
     void setWelcome(const std::string& text);
     void run() const;
 
@@ -57,6 +75,9 @@ private:
     std::string title_;
     std::string exitLabel_;
     std::string welcome_;
+    // store callbacks so the menu can refresh without keeping a wallet reference
+    std::function<HomeCards()> loadHomeCards_;
+    Action addHomeCard_, viewHomeCards_;
     std::vector<Item> items_;
 };
 

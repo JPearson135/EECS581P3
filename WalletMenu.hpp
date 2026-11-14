@@ -7,5 +7,7 @@
 namespace ui {
 // The "Wallet" section: Add card, View cards, Remove card.
 // "cards" must outlive the returned menu (the menu keeps a reference to it).
+// attach the favorites provider and wallet shortcuts while cards is alive
+void configureWalletHome(Menu& menu, wallet::CardWallet& cards);
 Menu walletMenu(wallet::CardWallet& cards);
 }

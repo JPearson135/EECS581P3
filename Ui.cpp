@@ -37,36 +37,9 @@ bool isActivityEvent(int event) {
            event == FL_MOUSEWHEEL || event == FL_KEYBOARD || event == FL_SHORTCUT;
 }
 
-enum class CardNetwork { Unknown, Visa, Mastercard, AmericanExpress, Discover };
-
-CardNetwork cardNetwork(std::string_view digits) {
-    std::string compact;
-    compact.reserve(digits.size());
-    for (char c : digits) {
-        if (c != ' ') compact.push_back(c);
-    }
-    if (!std::all_of(compact.begin(), compact.end(), [](char c) {
-            return c >= '0' && c <= '9';
-        })) return CardNetwork::Unknown;
-    if (!compact.empty() && compact.front() == '4') return CardNetwork::Visa;
-    if (compact.size() >= 2) {
-        const int prefix = (compact[0] - '0') * 10 + compact[1] - '0';
-        if (prefix >= 51 && prefix <= 55) return CardNetwork::Mastercard;
-        if (prefix == 34 || prefix == 37) return CardNetwork::AmericanExpress;
-        if (prefix == 65) return CardNetwork::Discover;
-    }
-    if (compact.size() >= 3) {
-        const int prefix = (compact[0] - '0') * 100 + (compact[1] - '0') * 10 + compact[2] - '0';
-        if (prefix >= 644 && prefix <= 649) return CardNetwork::Discover;
-    }
-    if (compact.size() >= 4) {
-        const int prefix = (compact[0] - '0') * 1000 + (compact[1] - '0') * 100 +
-                           (compact[2] - '0') * 10 + compact[3] - '0';
-        if (prefix >= 2221 && prefix <= 2720) return CardNetwork::Mastercard;
-        if (prefix == 6011) return CardNetwork::Discover;
-    }
-    return CardNetwork::Unknown;
-}
+// use the wallet classifier for both typed prefixes and saved card logos
+using wallet::CardNetwork;
+using wallet::cardNetwork;
 
 const char* cardNetworkAsset(CardNetwork network) {
     switch (network) {
@@ -1281,8 +1254,8 @@ void showCardDetails(const std::string& text, const std::string& iconPath,
     prompt(Kind::Message, text, nullptr, "", false, false, false, false, iconPath, &star);
 }
 
-const char* cardNetworkIcon(std::string_view digits) {
-    const char* icon = cardNetworkAsset(cardNetwork(digits));
+const char* cardNetworkIcon(wallet::CardNetwork network) {
+    const char* icon = cardNetworkAsset(network);
     return icon ? icon : "";
 }
 
@@ -1331,6 +1304,13 @@ void Menu::addSubmenu(const std::string& label, Menu submenu) {
     items_.push_back({label, nullptr, std::make_shared<Menu>(std::move(submenu))});
 }
 
+// register home providers without loading cards until the window is shown
+void Menu::setHomeCards(std::function<HomeCards()> load, Action add, Action view) {
+    loadHomeCards_ = std::move(load);
+    addHomeCard_ = std::move(add);
+    viewHomeCards_ = std::move(view);
+}
+
 void Menu::setWelcome(const std::string& text) { welcome_ = text; }
 
 void Menu::invoke(std::size_t i) const {
@@ -1373,8 +1353,64 @@ void Menu::run() const {
     home->scrollbar.color(bgColor());
     home->scrollbar.selection_color(lineColor());
     home->scrollbar.slider(FL_FLAT_BOX);
+    // Keep the dashboard current when home is opened or a card action finishes.
+    // keep logos and callback bindings alive for the current set of rows
+    std::vector<std::unique_ptr<Fl_Image>> homeLogos;
+    BindingList homeBindings;
+    auto runHomeAction = [](Fl_Widget*, void* data) {
+        // the action can rebuild the dashboard and discard its original binding
+        auto action = static_cast<Binding*>(data)->fn;
+        action();
+    };
+    std::function<void()> refreshHome = [&] {
+        // skip rebuilding after a nested dialog triggers vault lock or exit
+        if (!loadHomeCards_ || !window.shown()) return;
+        home->scroll_to(0, 0);
+        // rebuild the dashboard rows while keeping the scroll controls
+        for (int i = home->children() - 1; i >= 0; --i) {
+            auto* child = home->child(i);
+            if (child != &home->scrollbar && child != &home->hscrollbar) delete child;
+        }
+        // release the old callbacks and logos after deleting the rows that reference them
+        homeBindings = BindingList{};
+        homeLogos.clear();
+        home->begin();
+        // ask the controller for current favorites after any add, remove, or star changes
+        const HomeCards cards = loadHomeCards_();
+        new Text(kMargin, 125, 400, 52, "Favorite Cards", 36, textColor());
+        // show shortcuts only when the wallet loaded and highlight add card for an empty wallet
+        if (cards.available) {
+            auto* add = new LinkButton(kWinW - kMargin - 254, 132, 105, 30, "Add Card", !cards.hasCards);
+            add->callback(runHomeAction, homeBindings.add([&] { addHomeCard_(); refreshHome(); }));
+            if (cards.hasCards) {
+                auto* view = new LinkButton(kWinW - kMargin - 129, 132, 129, 30, "View All Cards", true);
+                view->callback(runHomeAction, homeBindings.add([&] { viewHomeCards_(); refreshHome(); }));
+            }
+        }
+        int y = 200;
+        // use the wallet state to explain why there are no rows
+        if (cards.favorites.empty()) {
+            const char* message = !cards.available ? "Saved cards are unavailable."
+                : cards.hasCards ? "No favorite cards yet. Star a card from its details to see it here."
+                                 : "Add your first card to get started.";
+            new Text(kMargin, y, contentW, 52, message, 16, mutedColor());
+        }
+        // reuse the scrollable row style and refresh after its details dialog returns
+        for (const auto& card : cards.favorites) {
+            auto* row = new Row(kMargin, y, contentW, 60, card.label, y == 200);
+            if (!card.iconPath.empty()) {
+                homeLogos.push_back(loadCardLogo(card.iconPath, 50, 28));
+                row->image(homeLogos.back().get());
+            }
+            row->callback(runHomeAction, homeBindings.add([&, open = card.open] { open(); refreshHome(); }));
+            y += 60;
+        }
+        home->end();
+        home->redraw();
+    };
     home->begin();
-    {
+    // keep the plain welcome page for menus without a dashboard provider
+    if (!loadHomeCards_) {
         std::string text = welcome_.empty() ? "Choose a section above to get started." : welcome_;
         std::string first = text, rest;
         std::size_t split = text.find("\n\n");
@@ -1436,7 +1472,9 @@ void Menu::run() const {
     }
 
     navButtons.resize(pages.size(), nullptr);
-    auto showPage = [&pages, &navButtons, &window](int index) {
+    auto showPage = [&pages, &navButtons, &window, &refreshHome](int index) {
+        // refresh when returning home so changes from wallet menus show up here
+        if (index == 0) refreshHome();
         for (std::size_t p = 0; p < pages.size(); ++p) {
             if (static_cast<int>(p) == index) pages[p]->show(); else pages[p]->hide();
             if (navButtons[p]) navButtons[p]->setSelected(static_cast<int>(p) == index);
@@ -1486,7 +1524,9 @@ void Menu::run() const {
     window.size_range(kWinW, kWinH);
     showPage(0);
     centre(window);
+    // populate the first dashboard after the window is visible
     window.show();
+    refreshHome();
     Fl::run();
 }
 
