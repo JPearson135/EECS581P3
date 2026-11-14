@@ -81,22 +81,28 @@ std::optional<std::string> pickCard(const wallet::CardWallet& cards, const std::
 }
 
 // validate the combined form before saving and report errors beside the right field
-void addCard(wallet::CardWallet& cards) {
-    if (!ready(cards)) return;
-    addCardForm([&](const std::string& label, const std::string& holder,
+// share field errors between add and edit and use the original label to find edits
+CardSubmit submitCard(wallet::CardWallet& cards, std::optional<std::string> original = {}) {
+    return [&cards, original = std::move(original)](const std::string& label, const std::string& holder,
                    const std::string& number, const std::string& expiry) -> CardFormError {
         if (!wallet::CardWallet::validLabel(label)) return {0, "Use 1–40 characters, without leading or trailing spaces."};
         if (!wallet::CardWallet::validHolder(holder)) return {1, "Use at most 64 characters."};
         if (!wallet::CardWallet::normalizeNumber(number)) return {2, "Check the card number: use 12–19 digits and a valid card checksum."};
         if (!wallet::CardWallet::normalizeExpiry(expiry)) return {3, "Enter a valid expiration date as MM/YY."};
-        switch (cards.add(label, holder, number, expiry)) {
+        switch (original ? cards.update(*original, label, holder, number, expiry)
+                         : cards.add(label, holder, number, expiry)) {
             case wallet::AddResult::Added: return {};
             // explain duplicate names instead of showing a generic save error
             case wallet::AddResult::DuplicateLabel: return {0, "A card with this name already exists. Choose a different Card Name."};
             case wallet::AddResult::Full: return {0, "The wallet is full. Remove a card first."};
             default: return {0, "Could not add this card. Check whether its name is already in use."};
         }
-    });
+    };
+}
+
+void addCard(wallet::CardWallet& cards) {
+    if (!ready(cards)) return;
+    addCardForm(submitCard(cards));
 }
 
 // share the card details flow between the picker and the home dashboard
@@ -111,11 +117,18 @@ void openCard(wallet::CardWallet& cards, const std::string& label) {
                 card.label + "\n\nName: " + (card.holder.empty() ? "(none)" : card.holder) +
                 "\nNumber: " + card.masked + "\nExpires: " + card.expiry +
                 (card.expired ? "  (expired)" : "");
+            // show masked details first and request the full number only for explicit actions
             showCardDetails(details, icon, card.starred,
-                            [&](bool starred) { return cards.setStarred(label, starred); });
-            // request the full number only when opening the existing masked reveal screen
-            if (const auto number = cards.revealNumber(label))
-                showSecret(label + " — Card number", std::string(number->view()), icon);
+                            [&](bool starred) { return cards.setStarred(label, starred); },
+                            [&] {
+                                if (const auto number = cards.revealNumber(label))
+                                    editCardForm(submitCard(cards, label), card.label, card.holder,
+                                                 number->view(), card.expiry);
+                            },
+                            [&] {
+                                if (const auto number = cards.revealNumber(label))
+                                    showSecret(label + " — Card number", std::string(number->view()), icon);
+                            });
             return;
         }
     });
@@ -156,7 +169,11 @@ void configureWalletHome(Menu& menu, wallet::CardWallet& cards) {
                                       [&cards, label = card.label] { openCard(cards, label); }});
         }
         return home;
-    }, [&cards] { addCard(cards); }, [&cards] { viewCards(cards); });
+    }, [&cards] { addCard(cards); }, [&cards] { viewCards(cards); },
+       // let the wallet save the dragged order and report a save failure
+       [&cards](std::size_t from, std::size_t to) {
+           guarded([&] { cards.moveFavorite(from, to); });
+       });
 }
 
 Menu walletMenu(wallet::CardWallet& cards) {

@@ -14,6 +14,9 @@ struct CardFormError { int field = 0; std::string message; };
 using CardSubmit = std::function<CardFormError(const std::string&, const std::string&, const std::string&, const std::string&)>;
 std::string expiryProblem(const std::string& expiry);
 void addCardForm(const CardSubmit& submit);
+// prefill the shared form for an existing card
+void editCardForm(const CardSubmit& submit, const std::string& label, const std::string& holder,
+                  std::string_view number, const std::string& expiry);
 void addAuthenticatorAccountForm();
 bool createPasswordScreen(const std::string& rules, const std::function<std::string(const std::string&, const std::string&)>& submit);
 bool unlockScreen(const std::function<bool(const std::string&)>& unlock);
@@ -21,8 +24,10 @@ void init();
 void setIdleLock(int seconds, std::function<void()> onIdle);
 void clearIdleLock();
 void showMessage(const std::string& text, const std::string& iconPath = "");
+// let the caller supply separate actions for starring, editing, and revealing
 void showCardDetails(const std::string& text, const std::string& iconPath,
-                     bool starred, const std::function<bool(bool)>& saveStar);
+                     bool starred, const std::function<bool(bool)>& saveStar,
+                     const std::function<void()>& edit, const std::function<void()>& reveal);
 // map wallet network metadata to an asset path for display
 const char* cardNetworkIcon(wallet::CardNetwork network);
 void showSecret(const std::string& description, const std::string& secret,
@@ -52,7 +57,8 @@ public:
         bool available = false;
     };
     // supply a fresh snapshot on each visit along with the two wallet shortcuts
-    void setHomeCards(std::function<HomeCards()> load, Action add, Action view);
+    void setHomeCards(std::function<HomeCards()> load, Action add, Action view,
+                      std::function<void(std::size_t, std::size_t)> move);
     void setWelcome(const std::string& text);
     void run() const;
 
@@ -78,6 +84,7 @@ private:
     // store callbacks so the menu can refresh without keeping a wallet reference
     std::function<HomeCards()> loadHomeCards_;
     Action addHomeCard_, viewHomeCards_;
+    std::function<void(std::size_t, std::size_t)> moveHomeCard_;
     std::vector<Item> items_;
 };
 

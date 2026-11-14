@@ -362,6 +362,66 @@ private:
     bool first_;
 };
 
+// a quick click opens the card; a held click activates reordering
+class FavoriteRow : public Row {
+public:
+    using Row::Row;
+    std::function<void(int)> preview;
+    std::function<void(int)> drop;
+    int marker = 0;
+
+    // cancel the pending hold timer before a dashboard refresh deletes the row
+    ~FavoriteRow() override { Fl::remove_timeout(beginHold, this); }
+
+    void draw() override {
+        Row::draw();
+        fl_color(accentColor());
+        if (held_) {
+            fl_rect(x() + 1, y() + 1, w() - 2, h() - 2);
+            fl_draw("Moving", x(), y(), w() - 35, h(), FL_ALIGN_RIGHT | FL_ALIGN_INSIDE);
+        }
+        if (marker) fl_rectf(x(), marker < 0 ? y() : y() + h() - 3, w(), 3);
+    }
+
+    int handle(int event) override {
+        if (event == FL_PUSH && Fl::event_button() == FL_LEFT_MOUSE) {
+            pressed_ = true;
+            Fl::add_timeout(0.5, beginHold, this);
+            return 1;
+        }
+        if (event == FL_DRAG && pressed_) {
+            if (held_) preview(Fl::event_y());
+            return 1;
+        }
+        if (event == FL_RELEASE && pressed_) {
+            Fl::remove_timeout(beginHold, this);
+            // release either drops the held row or opens its details on a quick click
+            const bool wasHeld = held_;
+            pressed_ = held_ = false;
+            redraw();
+            if (wasHeld) {
+                // copy the drop callback because refreshing home deletes this row
+                auto finish = drop;
+                finish(Fl::event_y());
+            } else if (Fl::event_inside(this)) {
+                do_callback();
+            }
+            return 1;
+        }
+        return Row::handle(event);
+    }
+
+private:
+    // activate the gold outline and moving label after half a second
+    static void beginHold(void* data) {
+        auto* row = static_cast<FavoriteRow*>(data);
+        row->held_ = true;
+        row->redraw();
+    }
+    bool pressed_ = false;
+    bool held_ = false;
+};
+
 // Text link with a hairline underneath; the line turns gold on hover.
 class LinkButton : public HoverButton {
 public:
@@ -612,6 +672,8 @@ enum class Kind { Message, Confirm, Text, Hidden };
 struct CardStarControl {
     bool starred;
     const std::function<bool(bool)>& save;
+    const std::function<void()>& edit;
+    const std::function<void()>& reveal;
 };
 
 bool prompt(Kind kind, const std::string& message, std::string* value,
@@ -725,7 +787,12 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
         };
         auto* toggle = new StarButton(pad, y, 40, 30);
         toggle->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
-        auto* error = new Fl_Box(pad + 44, y, 220, 30);
+        // edit and reveal are explicit actions while ok closes the details dialog
+        auto* edit = new LinkButton(pad + 48, y, 52, 30, "Edit", false);
+        edit->callback(trampoline, bindings.add([star, win] { win->hide(); star->edit(); }));
+        auto* reveal = new LinkButton(pad + 115, y, 112, 30, "Show number", false);
+        reveal->callback(trampoline, bindings.add(star->reveal));
+        auto* error = new Fl_Box(pad, y + 30, 240, 24);
         error->labelsize(13);
         error->labelcolor(accentColor());
         error->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
@@ -841,17 +908,19 @@ public:
 };
 
 // keep card entry and field errors together in one form
-void addCardForm(const CardSubmit& submit) {
+static void cardForm(const CardSubmit& submit, const char* title,
+                     const std::string& label, const std::string& holder,
+                     std::string_view number, const std::string& expiry) {
     Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
     Fl_PNG_Image visibleSource("visible", visibleIcon, sizeof(visibleIcon));
     std::unique_ptr<Fl_Image> hidden = makeIcon(hiddenSource, 96);
     std::unique_ptr<Fl_Image> visible = makeIcon(visibleSource, 104);
     BindingList bindings;
     DialogWindow dialog(540, 660);
-    dialog.copy_label("Add card");
+    dialog.copy_label(title);
     dialog.color(bgColor());
     dialog.set_modal();
-    new Text(40, 28, 460, 36, "Add card", 28, textColor());
+    new Text(40, 28, 460, 36, title, 28, textColor());
     const char* labels[] = {"Card Name", "Name on Card (optional)", "Card Number", "Expiration Date"};
     // show the warning beside its field and the explanation below it
     Fl_PNG_Image warningSource("warning", warningIcon, sizeof(warningIcon));
@@ -875,6 +944,11 @@ void addCardForm(const CardSubmit& submit) {
         errors[i]->labelcolor(accentColor());
         errors[i]->align(FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_INSIDE | FL_ALIGN_WRAP);
     }
+    // prefill the same form for edits, leaving the card number masked
+    fields[0]->value(label.c_str());
+    fields[1]->value(holder.c_str());
+    if (!number.empty()) fields[2]->value(number.data(), static_cast<int>(number.size()));
+    fields[3]->value(expiry.c_str());
     auto* toggle = new EyeButton(412, 353, 44, 44);
     toggle->insideField = true;
     toggle->inputOwner = fields[2];
@@ -984,8 +1058,19 @@ void addCardForm(const CardSubmit& submit) {
     centre(dialog);
     dialog.show();
     fields[0]->take_focus();
+    updateCardNetwork();
     while (dialog.shown()) Fl::wait();
     fields[2]->value("");
+}
+
+void addCardForm(const CardSubmit& submit) {
+    cardForm(submit, "Add card", "", "", {}, "");
+}
+
+// reuse the add card fields and warnings with the existing values filled in
+void editCardForm(const CardSubmit& submit, const std::string& label, const std::string& holder,
+                  std::string_view number, const std::string& expiry) {
+    cardForm(submit, "Edit card", label, holder, number, expiry);
 }
 
 void addAuthenticatorAccountForm() {
@@ -1249,8 +1334,9 @@ void showMessage(const std::string& text, const std::string& iconPath) {
 }
 
 void showCardDetails(const std::string& text, const std::string& iconPath,
-                     bool starred, const std::function<bool(bool)>& saveStar) {
-    CardStarControl star{starred, saveStar};
+                     bool starred, const std::function<bool(bool)>& saveStar,
+                     const std::function<void()>& edit, const std::function<void()>& reveal) {
+    CardStarControl star{starred, saveStar, edit, reveal};
     prompt(Kind::Message, text, nullptr, "", false, false, false, false, iconPath, &star);
 }
 
@@ -1305,7 +1391,9 @@ void Menu::addSubmenu(const std::string& label, Menu submenu) {
 }
 
 // register home providers without loading cards until the window is shown
-void Menu::setHomeCards(std::function<HomeCards()> load, Action add, Action view) {
+void Menu::setHomeCards(std::function<HomeCards()> load, Action add, Action view,
+                        std::function<void(std::size_t, std::size_t)> move) {
+    moveHomeCard_ = std::move(move);
     loadHomeCards_ = std::move(load);
     addHomeCard_ = std::move(add);
     viewHomeCards_ = std::move(view);
@@ -1357,6 +1445,13 @@ void Menu::run() const {
     // keep logos and callback bindings alive for the current set of rows
     std::vector<std::unique_ptr<Fl_Image>> homeLogos;
     BindingList homeBindings;
+    std::vector<FavoriteRow*> favoriteRows;
+    // map the pointer to a destination row using its current scrolled position
+    auto favoriteAt = [&](int y) {
+        for (std::size_t i = 0; i < favoriteRows.size(); ++i)
+            if (y < favoriteRows[i]->y() + favoriteRows[i]->h()) return i;
+        return favoriteRows.size() - 1;
+    };
     auto runHomeAction = [](Fl_Widget*, void* data) {
         // the action can rebuild the dashboard and discard its original binding
         auto action = static_cast<Binding*>(data)->fn;
@@ -1372,6 +1467,7 @@ void Menu::run() const {
             if (child != &home->scrollbar && child != &home->hscrollbar) delete child;
         }
         // release the old callbacks and logos after deleting the rows that reference them
+        favoriteRows.clear();
         homeBindings = BindingList{};
         homeLogos.clear();
         home->begin();
@@ -1397,7 +1493,23 @@ void Menu::run() const {
         }
         // reuse the scrollable row style and refresh after its details dialog returns
         for (const auto& card : cards.favorites) {
-            auto* row = new Row(kMargin, y, contentW, 60, card.label, y == 200);
+            auto* row = new FavoriteRow(kMargin, y, contentW, 60, card.label, y == 200);
+            const std::size_t from = favoriteRows.size();
+            favoriteRows.push_back(row);
+            row->preview = [&, from](int pointerY) {
+                // place the drop line above an earlier row or below a later row
+                const auto to = favoriteAt(pointerY);
+                for (std::size_t i = 0; i < favoriteRows.size(); ++i) {
+                    favoriteRows[i]->marker = i == to && to != from ? (to < from ? -1 : 1) : 0;
+                    favoriteRows[i]->redraw();
+                }
+            };
+            // save the new order only when the destination differs and rebuild the rows
+            row->drop = [&, from](int pointerY) {
+                const auto to = favoriteAt(pointerY);
+                if (from != to && moveHomeCard_) moveHomeCard_(from, to);
+                refreshHome();
+            };
             if (!card.iconPath.empty()) {
                 homeLogos.push_back(loadCardLogo(card.iconPath, 50, 28));
                 row->image(homeLogos.back().get());

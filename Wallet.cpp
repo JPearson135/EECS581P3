@@ -324,6 +324,62 @@ AddResult CardWallet::add(std::string_view label, std::string_view holder,
 
 
 // save the preference with the card and restore it if saving fails
+// replace the existing entry in place, retaining its star and list position
+AddResult CardWallet::update(std::string_view original, std::string_view label,
+                             std::string_view holder, std::string_view numberText,
+                             std::string_view expiryText) {
+    if (!loaded_) throw std::runtime_error("Wallet is not loaded");
+    const int index = indexOf(original);
+    if (index < 0) throw std::runtime_error("Card no longer exists");
+    if (!validLabel(label)) return AddResult::BadLabel;
+    const int duplicate = indexOf(label);
+    if (duplicate >= 0 && duplicate != index) return AddResult::DuplicateLabel;
+    if (!validHolder(holder)) return AddResult::BadHolder;
+    auto number = normalizeNumber(numberText);
+    if (!number) return AddResult::BadNumber;
+    auto expiry = normalizeExpiry(expiryText);
+    if (!expiry) return AddResult::BadExpiry;
+    Card& current = cards_[index];
+    Card replacement{std::string(label), std::string(holder), *expiry, std::move(*number), current.starred};
+    // keep the previous card available so a failed save can restore it
+    std::swap(current, replacement);
+    try {
+        save();
+    } catch (...) {
+        std::swap(current, replacement);
+        throw;
+    }
+    return AddResult::Added;
+}
+
+// use visible favorite indexes while saving the order through the existing wallet format
+bool CardWallet::moveFavorite(std::size_t from, std::size_t to) {
+    if (!loaded_) throw std::runtime_error("Wallet is not loaded");
+    std::vector<std::size_t> slots;
+    for (std::size_t i = 0; i < cards_.size(); ++i)
+        if (cards_[i].starred) slots.push_back(i);
+    if (from >= slots.size() || to >= slots.size()) return false;
+    if (from == to) return true;
+
+    // move through starred slots only so other cards keep their positions
+    auto move = [&](std::size_t start, std::size_t end) {
+        while (start != end) {
+            const std::size_t next = start < end ? start + 1 : start - 1;
+            std::swap(cards_[slots[start]], cards_[slots[next]]);
+            start = next;
+        }
+    };
+    move(from, to);
+    try {
+        save();
+    } catch (...) {
+        // reverse the move if the encrypted save fails
+        move(to, from);
+        throw;
+    }
+    return true;
+}
+
 bool CardWallet::setStarred(std::string_view label, bool starred) {
     if (!loaded_) throw std::runtime_error("Wallet is not loaded");
     const int index = indexOf(label);

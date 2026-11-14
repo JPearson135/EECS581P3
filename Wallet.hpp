@@ -78,6 +78,11 @@ public:
     // saving fails (in which case the change is undone first).
     AddResult add(std::string_view label, std::string_view holder,
                   std::string_view numberText, std::string_view expiryText);
+    // update the selected card in place and keep its favorite state
+    AddResult update(std::string_view original, std::string_view label, std::string_view holder,
+                     std::string_view number, std::string_view expiry);
+    // move between positions in the favorites list
+    bool moveFavorite(std::size_t from, std::size_t to);
     bool setStarred(std::string_view label, bool starred);
     bool remove(std::string_view label);                // false if there is no such card
     std::vector<CardSummary> list() const;              // masked only
