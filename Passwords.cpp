@@ -217,6 +217,14 @@ bool PasswordManager::remove(std::string_view site, std::string_view username) {
 bool PasswordManager::changePassword(std::string_view site, std::string_view username,
                                      std::string_view newPassword) {
     (void)site; (void)username; (void)newPassword;
+    /*if validPassword(newPassword) {
+        if (indexOf(site, username) >= 0) {
+            entries_[indexOf(site, username)].password = newPassword;
+            save();
+            return true;
+        }
+    }
+    throw std::invalid_argument("Password failed to validate.");*/
     return false;
 }
 
@@ -229,7 +237,17 @@ std::vector<EntrySummary> PasswordManager::list() const {
 //   (SecretBytes cannot be copied: build a new one from data() and size().)
 std::optional<security::SecretBytes> PasswordManager::revealPassword(std::string_view site,
                                                                      std::string_view username) const {
-    (void)site; (void)username;
+    /*Loadresult ldrs = load();
+    if (ldrs == Loadresult::Locked) {
+        throw std::invalid_argument("Failed to load, vault is locked.");
+    }
+    else if (ldrs == Loadresult::Damaged) {
+        return;
+    }
+    int dexPos = indexOf(site,username);
+    if (dexPos >= 0) {
+        
+    }*/
     return std::nullopt;
 }
 
