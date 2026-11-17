@@ -18,6 +18,7 @@ void addCardForm(const CardSubmit& submit);
 void editCardForm(const CardSubmit& submit, const std::string& label, const std::string& holder,
                   std::string_view number, const std::string& expiry);
 void addAuthenticatorAccountForm();
+void addPasswordEntryForm();
 bool createPasswordScreen(const std::string& rules, const std::function<std::string(const std::string&, const std::string&)>& submit);
 bool unlockScreen(const std::function<bool(const std::string&)>& unlock);
 void init();

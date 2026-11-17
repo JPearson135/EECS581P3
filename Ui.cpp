@@ -1079,20 +1079,22 @@ void addAuthenticatorAccountForm() {
     std::unique_ptr<Fl_Image> hidden = makeIcon(hiddenSource, 96);
     std::unique_ptr<Fl_Image> visible = makeIcon(visibleSource, 104);
     BindingList bindings;
-    DialogWindow dialog(540, 430);
+    DialogWindow dialog(540, 450);
     dialog.copy_label("Add authenticator account");
     dialog.color(bgColor());
     dialog.set_modal();
     new Text(40, 28, 460, 36, "Add authenticator account", 26, textColor());
+    new Text(40, 68, 460, 32, "UI preview only — accounts are not saved yet.",
+             14, mutedColor());
 
-    new Text(40, 88, 460, 24, "Website", 15, mutedColor());
-    auto* website = new Field<Fl_Input>(40, 116, 460, 34);
-    new Text(40, 166, 460, 24, "Username", 15, mutedColor());
-    auto* username = new Field<Fl_Input>(40, 194, 460, 34);
-    new Text(40, 244, 400, 24, "Base32 secret", 15, mutedColor());
-    auto* secret = new Field<Fl_Secret_Input>(40, 272, 408, 34);
+    new Text(40, 108, 460, 24, "Website", 15, mutedColor());
+    auto* website = new Field<Fl_Input>(40, 136, 460, 34);
+    new Text(40, 186, 460, 24, "Username", 15, mutedColor());
+    auto* username = new Field<Fl_Input>(40, 214, 460, 34);
+    new Text(40, 264, 400, 24, "Base32 secret", 15, mutedColor());
+    auto* secret = new Field<Fl_Secret_Input>(40, 292, 408, 34);
 
-    auto* eye = new EyeButton(456, 267, 44, 44);
+    auto* eye = new EyeButton(456, 287, 44, 44);
     eye->insideField = true;
     eye->inputOwner = secret;
     eye->color(bgColor());
@@ -1108,18 +1110,18 @@ void addAuthenticatorAccountForm() {
     }));
 
     auto close = [&] {
+        website->value("");
+        username->value("");
         secret->value("");
         dialog.hide();
     };
     auto add = [&] {
-        (void)website;
-        (void)username;
         close();
         notImplemented("Saving authenticator accounts");
     };
-    auto* cancel = new LinkButton(240, 372, 80, 30, "Cancel", false);
+    auto* cancel = new LinkButton(240, 392, 80, 30, "Cancel", false);
     cancel->callback(trampoline, bindings.add(close));
-    auto* addButton = new LinkButton(350, 372, 150, 30, "Add account", true);
+    auto* addButton = new LinkButton(350, 392, 150, 30, "Add account", true);
     addButton->callback(trampoline, bindings.add(add));
     dialog.onEnter = add;
     dialog.end();
@@ -1127,7 +1129,71 @@ void addAuthenticatorAccountForm() {
     dialog.show();
     website->take_focus();
     while (dialog.shown()) Fl::wait();
+    website->value("");
+    username->value("");
     secret->value("");
+}
+
+void addPasswordEntryForm() {
+    Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
+    Fl_PNG_Image visibleSource("visible", visibleIcon, sizeof(visibleIcon));
+    std::unique_ptr<Fl_Image> hidden = makeIcon(hiddenSource, 96);
+    std::unique_ptr<Fl_Image> visible = makeIcon(visibleSource, 104);
+    BindingList bindings;
+    DialogWindow dialog(540, 610);
+    dialog.copy_label("Add password entry");
+    dialog.color(bgColor());
+    dialog.set_modal();
+    new Text(40, 28, 460, 36, "Add password entry", 26, textColor());
+    new Text(40, 70, 460, 38, "UI preview only — entries are not saved yet.",
+             14, mutedColor());
+
+    new Text(40, 126, 460, 24, "Site or service", 15, mutedColor());
+    auto* site = new Field<Fl_Input>(40, 154, 460, 34);
+    new Text(40, 204, 460, 24, "Username or email", 15, mutedColor());
+    auto* username = new Field<Fl_Input>(40, 232, 460, 34);
+    new Text(40, 282, 400, 24, "Password", 15, mutedColor());
+    auto* password = new Field<Fl_Secret_Input>(40, 310, 408, 34);
+
+    auto* eye = new EyeButton(456, 305, 44, 44);
+    eye->insideField = true;
+    eye->inputOwner = password;
+    eye->color(bgColor());
+    eye->image(visible.get());
+    eye->tooltip("Show password");
+    eye->callback(trampoline, bindings.add([password, eye, &hidden, &visible] {
+        const bool reveal = (password->type() & FL_INPUT_TYPE) == FL_SECRET_INPUT;
+        password->type(reveal ? FL_NORMAL_INPUT : FL_SECRET_INPUT);
+        eye->image(reveal ? hidden.get() : visible.get());
+        eye->tooltip(reveal ? "Hide password" : "Show password");
+        password->redraw();
+        eye->redraw();
+    }));
+
+    new Text(40, 362, 460, 24, "Notes (optional)", 15, mutedColor());
+    auto* notes = new Field<Fl_Input>(40, 390, 460, 34);
+    auto clearAndClose = [&] {
+        site->value("");
+        username->value("");
+        password->value("");
+        notes->value("");
+        dialog.hide();
+    };
+    auto submit = [&] {
+        clearAndClose();
+        notImplemented("Saving password entries");
+    };
+    auto* cancel = new LinkButton(240, 520, 80, 30, "Cancel", false);
+    cancel->callback(trampoline, bindings.add(clearAndClose));
+    auto* addButton = new LinkButton(350, 520, 150, 30, "Add entry", true);
+    addButton->callback(trampoline, bindings.add(submit));
+    dialog.onEnter = submit;
+    dialog.end();
+    centre(dialog);
+    dialog.show();
+    site->take_focus();
+    while (dialog.shown()) Fl::wait();
+    password->value("");
 }
 
 // first-time setup with both password fields on the same screen
