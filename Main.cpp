@@ -8,8 +8,10 @@
 #include <iostream>
 #include <optional>
 #include <openssl/crypto.h>
+#include "AuthMenu.hpp"
 #include "Backup.hpp"
 #include "Keys.hpp"
+#include "PasswordMenu.hpp"
 #include "Storage.hpp"
 #include "Ui.hpp"
 #include "Vault.hpp"
@@ -156,15 +158,8 @@ int main() {
             ui::Menu root("DigiWallet", "Exit");
             // wire home to the unlocked wallet and its existing card actions
             ui::configureWalletHome(root, cards);
-            root.addSubmenu("Passwords",
-                ui::placeholderMenu("Password Manager",
-                    {"Add entry", "View entries", "Edit or delete entry", "Search entries",
-                     "Generate a password", "Check password strength"}));
-            ui::Menu authenticatorMenu("Authenticator");
-            authenticatorMenu.add("Add account", ui::addAuthenticatorAccountForm);
-            authenticatorMenu.add("Show codes", [] { ui::notImplemented("Showing authenticator codes"); });
-            authenticatorMenu.add("Delete account", [] { ui::notImplemented("Deleting authenticator accounts"); });
-            root.addSubmenu("Authenticator", authenticatorMenu);
+            root.addSubmenu("Passwords", ui::passwordMenu());
+            root.addSubmenu("Authenticator", ui::authMenu());
             root.addSubmenu("Wallet", ui::walletMenu(cards));
             root.addSubmenu("Backup", backupMenu(backups, cards));
             root.addSubmenu("Security", securityMenu(lockRequested));
