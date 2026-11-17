@@ -61,6 +61,8 @@ public:
     LoadResult load();  // call right after login
     // TODO (Req 3): implement in Passwords.cpp. Clear the entries so the passwords wipe themselves.
     void lock();        // clears everything from memory
+    bool loaded() const { return loaded_; }
+    std::size_t size() const { return entries_.size(); }
  
     // All of these throw std::runtime_error if not loaded, or if a save fails
     // (after undoing the change in memory).
