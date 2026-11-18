@@ -176,7 +176,24 @@ PasswordManager::PasswordManager(security::KeyManager& keys, storage::SecureFile
 // TODO (Req 6): load() - copy CardWallet::load(). Locked if the vault is locked; missing file = empty list;
 //   decryptFile + parse; any failure = Damaged (nothing loaded).
 LoadResult PasswordManager::load() {
-    return LoadResult::Locked;
+    if (!keys_.unlocked()) return LoadResult::Locked;
+
+    auto raw = store_.read(kFileName);
+    if (!raw) {                         // no file yet = empty list
+        entries_.clear();
+        loaded_ = true;
+        return LoadResult::Ok;
+    }
+
+    auto plain = keys_.decryptFile(kFileName, *raw);
+    if (!plain) return LoadResult::Damaged;
+
+    auto parsed = parse(*plain);
+    if (!parsed) return LoadResult::Damaged;
+
+    entries_ = std::move(*parsed);
+    loaded_ = true;
+    return LoadResult::Ok;
 }
 
 // lock() - clear entries_ (passwords wipe themselves) and set loaded_ = false.
@@ -203,52 +220,94 @@ int PasswordManager::indexOf(std::string_view site, std::string_view username) c
 //   Duplicate, Full; push_back, then save(); if save() throws, pop_back() and rethrow.
 AddResult PasswordManager::add(std::string_view site, std::string_view username,
                                std::string_view password, std::string_view notes) {
-    (void)site; (void)username; (void)password; (void)notes;
-    return AddResult::BadSite;
+    if (!loaded_) throw std::logic_error("password manager not loaded");
+    if (!validSite(site))         return AddResult::BadSite;
+    if (!validUsername(username)) return AddResult::BadUsername;
+    if (!validPassword(password)) return AddResult::BadPassword;
+    if (!validNotes(notes))       return AddResult::BadNotes;
+    if (indexOf(site, username) != -1)  return AddResult::Duplicate;
+    if (entries_.size() >= kMaxEntries) return AddResult::Full;
+
+    Entry e;
+    e.site = std::string(site);
+    e.username = std::string(username);
+    e.notes = std::string(notes);
+    e.password = security::SecretBytes(reinterpret_cast<const unsigned char*>(password.data()),
+                                       password.size());
+
+    entries_.push_back(std::move(e));
+    try {
+        save();
+    } catch (...) {
+        entries_.pop_back();
+        throw;
+    }
+    return AddResult::Added;
 }
 
 // TODO: remove() - like CardWallet::remove(): erase, save(), put it back if save() throws.
 bool PasswordManager::remove(std::string_view site, std::string_view username) {
-    (void)site; (void)username;
-    return false;
+    if (!loaded_) throw std::logic_error("password manager not loaded");
+    int i = indexOf(site, username);
+    if (i < 0) return false;
+
+    Entry removed = std::move(entries_[i]);
+    entries_.erase(entries_.begin() + i);
+    try {
+        save();
+    } catch (...) {
+        entries_.insert(entries_.begin() + i, std::move(removed));
+        throw;
+    }
+    return true;
 }
 
 // TODO: changePassword() - validPassword or throw; replace the password, save(), restore the old one on failure.
 bool PasswordManager::changePassword(std::string_view site, std::string_view username,
                                      std::string_view newPassword) {
-    (void)site; (void)username; (void)newPassword;
-    /*if validPassword(newPassword) {
-        if (indexOf(site, username) >= 0) {
-            entries_[indexOf(site, username)].password = newPassword;
-            save();
-            return true;
-        }
+    if (!loaded_) throw std::logic_error("password manager not loaded");
+    if (!validPassword(newPassword)) throw std::invalid_argument("Password failed to validate.");
+
+    int i = indexOf(site, username);
+    if (i < 0) return false;
+
+    security::SecretBytes old = std::move(entries_[i].password);
+    entries_[i].password = security::SecretBytes(
+        reinterpret_cast<const unsigned char*>(newPassword.data()), newPassword.size());
+    try {
+        save();
+    } catch (...) {
+        entries_[i].password = std::move(old);
+        throw;
     }
-    throw std::invalid_argument("Password failed to validate.");*/
-    return false;
+    return true;
 }
 
 // TODO (Req 6): list() - throw if not loaded; return site, username, notes for every entry (never the password).
 std::vector<EntrySummary> PasswordManager::list() const {
-    return {};
+    if (!loaded_) throw std::logic_error("password manager not loaded");
+    std::vector<EntrySummary> out;
+    out.reserve(entries_.size());
+    for (const Entry& e : entries_) {
+        EntrySummary s;
+        s.site = e.site;
+        s.username = e.username;
+        s.notes = e.notes;
+        out.push_back(std::move(s));
+    }
+    return out;
 }
 
 // TODO (Req 6): revealPassword() - throw if not loaded; return a copy of the password in a SecretBytes, or nothing.
 //   (SecretBytes cannot be copied: build a new one from data() and size().)
 std::optional<security::SecretBytes> PasswordManager::revealPassword(std::string_view site,
                                                                      std::string_view username) const {
-    /*Loadresult ldrs = load();
-    if (ldrs == Loadresult::Locked) {
-        throw std::invalid_argument("Failed to load, vault is locked.");
-    }
-    else if (ldrs == Loadresult::Damaged) {
-        return;
-    }
-    int dexPos = indexOf(site,username);
-    if (dexPos >= 0) {
-        
-    }*/
-    return std::nullopt;
+    if (!loaded_) throw std::logic_error("password manager not loaded");
+    int i = indexOf(site, username);
+    if (i < 0) return std::nullopt;
+
+    const security::SecretBytes& src = entries_[i].password;
+    return security::SecretBytes(src.data(), src.size());
 }
 
 // ------------------------------------------------------------------ password generator
@@ -256,9 +315,54 @@ std::optional<security::SecretBytes> PasswordManager::revealPassword(std::string
 // TODO (Req 7): generatePassword() - reject no types chosen or length < number of chosen types (and > kMaxPassword);
 //   pick one random character from each chosen type, fill the rest from all chosen types,
 //   shuffle; use security::crypto::randomBytes (never rand()) and avoid modulo bias (discard values that skew the pick).
+namespace {
+// Uniform random number in [0, n), n between 1 and 256, with no modulo bias.
+std::size_t randomBelow(std::size_t n) {
+    const unsigned limit = 256 - (256 % n);   // values >= limit would skew the pick
+    for (;;) {
+        auto b = security::crypto::randomBytes(1);
+        unsigned v = b.data()[0];
+        if (v < limit) return v % n;
+    }
+}
+}  // namespace
+
 std::optional<security::SecretBytes> generatePassword(const GenerateOptions& options) {
-    (void)options;
-    return std::nullopt;
+    static const std::string_view kUpper   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    static const std::string_view kLower   = "abcdefghijklmnopqrstuvwxyz";
+    static const std::string_view kDigits  = "0123456789";
+    static const std::string_view kSymbols = "!@#$%^&*()-_=+[]{};:,.?/";
+
+    // Which character types did the user choose?
+    std::vector<std::string_view> pools;
+    if (options.upper)   pools.push_back(kUpper);
+    if (options.lower)   pools.push_back(kLower);
+    if (options.digits)  pools.push_back(kDigits);
+    if (options.symbols) pools.push_back(kSymbols);
+
+    if (pools.empty() || options.length < pools.size() || options.length > PasswordManager::kMaxPassword)
+        return std::nullopt;
+
+    // All chosen characters together, for filling the rest.
+    std::string all;
+    for (std::string_view p : pools) all.append(p);
+
+    security::SecretBytes out(options.length);   // write straight into it: no leftover copies
+    unsigned char* data = out.data();
+
+    // One guaranteed character from each chosen type...
+    std::size_t n = 0;
+    for (std::string_view p : pools)
+        data[n++] = static_cast<unsigned char>(p[randomBelow(p.size())]);
+    // ...then fill the rest from the combined pool.
+    while (n < options.length)
+        data[n++] = static_cast<unsigned char>(all[randomBelow(all.size())]);
+
+    // Fisher-Yates shuffle so the guaranteed characters aren't always at the front.
+    for (std::size_t i = options.length - 1; i > 0; --i)
+        std::swap(data[i], data[randomBelow(i + 1)]);
+
+    return out;
 }
 
 }  // namespace passwords

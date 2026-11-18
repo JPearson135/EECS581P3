@@ -37,10 +37,10 @@ struct EntrySummary {
  
 struct GenerateOptions {
     std::size_t length = 16;
-    bool includeLowercase = true;
-    bool includeUppercase = true;
-    bool includeDigits = true;
-    bool includeSymbols = true;
+    bool upper = true;
+    bool lower = true;
+    bool digits = true;
+    bool symbols = true;
 };
 
 std::optional<security::SecretBytes> generatePassword(const GenerateOptions& options);
