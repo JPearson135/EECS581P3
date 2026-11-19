@@ -1,5 +1,6 @@
 // Totp.cpp - Implementation for Totp.hpp: Authenticator feature.
 #include "Totp.hpp"
+#include "Keys.hpp"
 #include <algorithm>
 #include <exception>
 #include <stdexcept>

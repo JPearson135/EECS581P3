@@ -1,9 +1,6 @@
 // Totp.hpp - Authenticator feature. Stores authenticator accounts 
 // and generates the time-based 6-digit codes with the seconds remaining.
 #pragma once
-#include "Crypto.hpp"
-#include "Keys.hpp"
-#include "Storage.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -11,6 +8,15 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+namespace security {
+class KeyManager;
+class SecretBytes;
+}
+
+namespace storage {
+class SecureFileStore;
+}
 
 class AuthAccount {
 public:
