@@ -1,7 +1,13 @@
 // AuthMenu.cpp - UI menu for the Authenticator feature.
 #include "AuthMenu.hpp"
+#include <FL/Fl.H>
+#include <FL/Fl_Window.H>
 #include <cstdint>
+#include <exception>
+#include <functional>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ui {
@@ -16,6 +22,18 @@ void wipe(std::vector<std::uint8_t>& bytes) {
     volatile std::uint8_t* p = bytes.empty() ? nullptr : bytes.data();
     for (std::size_t i = 0; i < bytes.size(); ++i) p[i] = 0;
     bytes.clear();
+}
+
+const char* const kSaveFailed =
+    "That could not be saved, so nothing was changed. Please try again.";
+
+// Runs an action; if saving fails, tell the user instead of crashing.
+void guarded(const std::function<void()>& action) {
+    try {
+        action();
+    } catch (const std::exception&) {
+        showMessage(kSaveFailed);
+    }
 }
 
 // Every action starts here: if the accounts file failed its check, say so and stop.
@@ -63,12 +81,48 @@ void addAccountScreen(Authenticator& auth) {
 
 }  // namespace
 
+// Lets the user choose one account. Returns its name, or nothing if they cancel or there are none.
+std::optional<std::string> pickAccount(const Authenticator& auth, const std::string& title) {
+    const auto accounts = auth.list();
+    if (accounts.empty()) {
+        showMessage("There are no saved accounts yet. Choose \"Add account\" first.");
+        return std::nullopt;
+    }
+    std::optional<std::string> chosen;
+    Menu picker(title, "Cancel");
+    for (const AuthSummary& account : accounts) {
+        const std::string name = account.name;
+        const std::string contact = account.email.empty() ? account.phone : account.email;
+        picker.add(name + "    " + contact, [&chosen, name] {
+            chosen = name;
+            // Closing the picker: it is the top window while it is open.
+            if (Fl_Window* top = Fl::first_window()) top->hide();
+        });
+    }
+    // Same trick as the card picker: a submenu opens as a small dialog, so wrap the picker in a
+    // throwaway parent and "invoke" it.
+    Menu host("Authenticator");
+    host.addSubmenu(title, std::move(picker));
+    host.invoke(0);
+    return chosen;
+}
+
+void removeAccountScreen(Authenticator& auth) {
+    if (!ready(auth)) return;
+    guarded([&] {
+        const auto name = pickAccount(auth, "Delete account");
+        if (!name) return;
+        if (!confirm("Delete \"" + *name + "\"? This cannot be undone.")) return;
+        if (auth.removeAccount(*name)) showMessage("Account deleted.");
+    });
+}
+
 Menu authMenu(Authenticator& auth) {
     Menu menu("Authenticator");
     Authenticator* a = &auth;
     menu.add("Add account", [a] { addAccountScreen(*a); });
     menu.add("Show codes", [] { notImplemented("Showing authenticator codes"); });
-    menu.add("Delete account", [] { notImplemented("Deleting authenticator accounts"); });
+    menu.add("Delete account", [a] { removeAccountScreen(*a); });
         // the saved accounts, shown under the rows above (name, then email and/or phone; never the secret)
     menu.setList([a] {
         Menu::List list;

@@ -373,9 +373,24 @@ std::vector<AuthSummary> Authenticator::list() const {
     return out;
 }
 
-bool Authenticator::removeAccount(const std::string& name){
+// Removes an account and saves. If the save fails the account is put back, secret included.
+bool Authenticator::removeAccount(const std::string& name) {
+    if (!loaded_) throw std::runtime_error("Authenticator is not loaded");
+    for (auto it = accounts.begin(); it != accounts.end(); ++it) {
+        if (!sameName(it->first, name)) continue;
+        auto removed = accounts.extract(it);  // take it out of the map without copying it
+        try {
+            save();
+        } catch (...) {
+            accounts.insert(std::move(removed));  // the save failed, so the account stays: put it back
+            throw;
+        }
+        wipeBytes(removed.mapped().secret);  // the removed secret does not linger in memory
+        return true;
+    }
     return false;
 }
+
 std::string Authenticator::currentCode(const AuthAccount& account){
     return "placeholder";
 }
