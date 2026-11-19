@@ -362,6 +362,30 @@ private:
     bool first_;
 };
 
+// read-only row: a title with a smaller detail line underneath, no arrow and no click action
+class InfoRow : public Fl_Widget {
+public:
+    InfoRow(int x, int y, int w, int h, const std::string& title, const std::string& detail, bool first)
+        : Fl_Widget(x, y, w, h), title_(title), detail_(detail), first_(first) {}
+    void draw() override {
+        fl_color(bgColor());
+        fl_rectf(x(), y(), w(), h());
+        fl_color(lineColor());
+        fl_rectf(x(), y() + h() - 1, w(), 1);
+        if (first_) fl_rectf(x(), y(), w(), 1);
+        // the last argument is 0 so an '@' in an email is not read as a symbol code
+        fl_font(FL_HELVETICA, scaledText(*this, 17));
+        fl_color(textColor());
+        fl_draw(title_.c_str(), x(), y() + 8, w(), 24, FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
+        fl_font(FL_HELVETICA, scaledText(*this, 13));
+        fl_color(mutedColor());
+        fl_draw(detail_.c_str(), x(), y() + 34, w(), 18, FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
+    }
+private:
+    std::string title_, detail_;
+    bool first_;
+};
+
 // a quick click opens the card; a held click activates reordering
 class FavoriteRow : public Row {
 public:
@@ -1073,28 +1097,41 @@ void editCardForm(const CardSubmit& submit, const std::string& label, const std:
     cardForm(submit, "Edit card", label, holder, number, expiry);
 }
 
-void addAuthenticatorAccountForm() {
+void addAuthenticatorAccountForm(const AuthSubmit& submit) {
     Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
     Fl_PNG_Image visibleSource("visible", visibleIcon, sizeof(visibleIcon));
+    Fl_PNG_Image warningSource("warning", warningIcon, sizeof(warningIcon));
     std::unique_ptr<Fl_Image> hidden = makeIcon(hiddenSource, 96);
     std::unique_ptr<Fl_Image> visible = makeIcon(visibleSource, 104);
+    std::unique_ptr<Fl_Image> warning = makeIcon(warningSource, 96);
     BindingList bindings;
-    DialogWindow dialog(540, 450);
+    DialogWindow dialog(540, 660);
     dialog.copy_label("Add authenticator account");
     dialog.color(bgColor());
     dialog.set_modal();
     new Text(40, 28, 460, 36, "Add authenticator account", 26, textColor());
-    new Text(40, 68, 460, 32, "UI preview only — accounts are not saved yet.",
-             14, mutedColor());
-
-    new Text(40, 108, 460, 24, "Website", 15, mutedColor());
-    auto* website = new Field<Fl_Input>(40, 136, 460, 34);
-    new Text(40, 186, 460, 24, "Username", 15, mutedColor());
-    auto* username = new Field<Fl_Input>(40, 214, 460, 34);
-    new Text(40, 264, 400, 24, "Base32 secret", 15, mutedColor());
-    auto* secret = new Field<Fl_Secret_Input>(40, 292, 408, 34);
-
-    auto* eye = new EyeButton(456, 287, 44, 44);
+    new Text(40, 66, 460, 20, "Enter an email address, a phone number, or both.", 14, mutedColor());
+    const char* labels[] = {"Account Name", "Email", "Phone Number", "Base32 Secret"};
+    Fl_Input* fields[4];
+    Fl_Box* errors[4];
+    Fl_Box* warnings[4];
+    for (int i = 0; i < 4; ++i) {
+        int y = 92 + i * 118;
+        new Text(40, y, 460, 24, labels[i], 15, mutedColor());
+        // the secret is hidden by default and leaves room for the show/hide button
+        if (i == 3) fields[i] = new Field<Fl_Secret_Input>(40, y + 30, 368, 34);
+        else fields[i] = new Field<Fl_Input>(40, y + 30, 416, 34);
+        // show the warning beside its field and the explanation below it
+        warnings[i] = new Fl_Box(468, y + 35, 24, 24);
+        warnings[i]->image(warning.get());
+        warnings[i]->hide();
+        errors[i] = new Fl_Box(40, y + 68, 460, 44);
+        errors[i]->labelsize(13);
+        errors[i]->labelcolor(accentColor());
+        errors[i]->align(FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_INSIDE | FL_ALIGN_WRAP);
+    }
+    Fl_Input* secret = fields[3];
+    auto* eye = new EyeButton(416, 471, 44, 44);
     eye->insideField = true;
     eye->inputOwner = secret;
     eye->color(bgColor());
@@ -1109,29 +1146,36 @@ void addAuthenticatorAccountForm() {
         eye->redraw();
     }));
 
+    auto clearFields = [&] { for (auto* field : fields) field->value(""); };
     auto close = [&] {
-        website->value("");
-        username->value("");
-        secret->value("");
+        clearFields();
         dialog.hide();
     };
-    auto add = [&] {
-        close();
-        notImplemented("Saving authenticator accounts");
+    auto save = [&] {
+        std::string secretText = fields[3]->value();
+        AuthFormError problem;
+        for (int i = 0; i < 4; ++i) { errors[i]->copy_label(""); warnings[i]->hide(); }
+        try { problem = submit(fields[0]->value(), fields[1]->value(), fields[2]->value(), secretText); }
+        catch (const std::exception&) { problem = {0, "Could not save the account. Please try again."}; }
+        std::fill(secretText.begin(), secretText.end(), '\0');
+        if (problem.message.empty()) { close(); return; }
+        const int at = std::clamp(problem.field, 0, 3);
+        errors[at]->copy_label(problem.message.c_str());
+        warnings[at]->show();
+        dialog.redraw();
     };
-    auto* cancel = new LinkButton(240, 392, 80, 30, "Cancel", false);
+    auto* cancel = new LinkButton(240, 610, 80, 30, "Cancel", false);
     cancel->callback(trampoline, bindings.add(close));
-    auto* addButton = new LinkButton(350, 392, 150, 30, "Add account", true);
-    addButton->callback(trampoline, bindings.add(add));
-    dialog.onEnter = add;
+    auto* addButton = new LinkButton(350, 610, 150, 30, "Add account", true);
+    addButton->callback(trampoline, bindings.add(save));
+    for (auto* field : fields) field->callback(trampoline, bindings.add(save));
+    dialog.onEnter = save;
     dialog.end();
     centre(dialog);
     dialog.show();
-    website->take_focus();
+    fields[0]->take_focus();
     while (dialog.shown()) Fl::wait();
-    website->value("");
-    username->value("");
-    secret->value("");
+    clearFields();
 }
 
 void addPasswordEntryForm() {
@@ -1466,6 +1510,7 @@ void Menu::setHomeCards(std::function<HomeCards()> load, Action add, Action view
 }
 
 void Menu::setWelcome(const std::string& text) { welcome_ = text; }
+void Menu::setList(std::function<List()> load) { loadList_ = std::move(load); }
 
 void Menu::invoke(std::size_t i) const {
     if (i >= items_.size()) return;
@@ -1481,6 +1526,8 @@ void Menu::run() const {
     const int contentW = kWinW - 2 * kMargin;
     BindingList bindings;
     std::vector<Fl_Widget*> pages;
+    // one refresh function per page (empty for pages without a list), same order as `pages`
+    std::vector<std::function<void()>> pageRefresh;
     std::vector<NavButton*> navButtons;
 
     Fl_Double_Window window(kWinW, kWinH);
@@ -1619,6 +1666,7 @@ void Menu::run() const {
     homePage->end();
     homePage->resizable(home);
     pages.push_back(homePage);
+    pageRefresh.push_back(nullptr);
 
     std::vector<int> pageOfItem(itemCount(), -1);
     for (std::size_t i = 0; i < itemCount(); ++i) {
@@ -1637,9 +1685,41 @@ void Menu::run() const {
         new Text(kMargin, 110, contentW, 20, "SECTION", 12, dimColor(), 4);
         new Text(kMargin, 146, contentW, 56, sub->title(), 40, textColor());
         int y = 236;
+        const int listTop = y + 60 * static_cast<int>(sub->itemCount());
+        // a section can show a read-only list under its rows (for example the saved accounts);
+        // rebuild it from a fresh snapshot whenever the section is shown or one of its actions ends
+        std::function<void()> refresh;
+        if (sub->loadList_) {
+            auto listWidgets = std::make_shared<std::vector<Fl_Widget*>>();
+            refresh = [page, sub, listWidgets, listTop, contentW, &window] {
+                if (!window.shown()) return;  // an action may have locked or closed the window
+                for (Fl_Widget* widget : *listWidgets) delete widget;
+                listWidgets->clear();
+                page->begin();
+                const List list = sub->loadList_();
+                int at = listTop + 28;
+                listWidgets->push_back(new Text(kMargin, at, contentW, 20, upper(list.heading), 12, dimColor(), 4));
+                at += 36;
+                if (list.rows.empty()) {
+                    listWidgets->push_back(new Text(kMargin, at, contentW, 40, list.emptyMessage, 16, mutedColor()));
+                    at += 52;
+                }
+                for (std::size_t k = 0; k < list.rows.size(); ++k) {
+                    listWidgets->push_back(new InfoRow(kMargin, at, contentW, 60, list.rows[k].title,
+                                                       list.rows[k].detail, k == 0));
+                    at += 60;
+                }
+                listWidgets->push_back(new Fl_Box(kMargin, at, 1, 24));
+                page->end();
+                page->redraw();
+            };
+        }
         for (std::size_t j = 0; j < sub->itemCount(); ++j) {
             Row* row = new Row(kMargin, y, contentW, 60, sub->itemLabel(j), j == 0);
-            row->callback(trampoline, bindings.add([sub, j] { sub->invoke(j); }));
+            row->callback(trampoline, bindings.add([sub, j, refresh] {
+                sub->invoke(j);
+                if (refresh) refresh();
+            }));
             y += 60;
         }
         new Fl_Box(kMargin, y, 1, 24);
@@ -1647,12 +1727,14 @@ void Menu::run() const {
         page->hide();
         pageOfItem[i] = static_cast<int>(pages.size());
         pages.push_back(page);
+        pageRefresh.push_back(refresh);
     }
 
     navButtons.resize(pages.size(), nullptr);
-    auto showPage = [&pages, &navButtons, &window, &refreshHome](int index) {
+    auto showPage = [&pages, &navButtons, &window, &refreshHome, &pageRefresh](int index) {
         // refresh when returning home so changes from wallet menus show up here
         if (index == 0) refreshHome();
+        else if (static_cast<std::size_t>(index) < pageRefresh.size() && pageRefresh[index]) pageRefresh[index]();
         for (std::size_t p = 0; p < pages.size(); ++p) {
             if (static_cast<int>(p) == index) pages[p]->show(); else pages[p]->hide();
             if (navButtons[p]) navButtons[p]->setSelected(static_cast<int>(p) == index);

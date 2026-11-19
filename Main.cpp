@@ -148,18 +148,20 @@ int main() {
         }
         security::KeyManager keys(store);
         wallet::CardWallet cards(keys, store);
+        Authenticator auth(keys, store);
         backup::BackupService backups(keys, store);
 
         while (true) {
             if (!security::unlockVault(keys)) return 0;  // user cancelled or ran out of attempts
             cards.load();  // a damaged cards file is reported inside the Wallet screens
+            auth.load();
 
             bool lockRequested = false;
             ui::Menu root("DigiWallet", "Exit");
             // wire home to the unlocked wallet and its existing card actions
             ui::configureWalletHome(root, cards);
             root.addSubmenu("Passwords", ui::passwordMenu());
-            root.addSubmenu("Authenticator", ui::authMenu());
+            root.addSubmenu("Authenticator", ui::authMenu(auth));
             root.addSubmenu("Wallet", ui::walletMenu(cards));
             root.addSubmenu("Backup", backupMenu(backups, cards));
             root.addSubmenu("Security", securityMenu(lockRequested));
@@ -169,6 +171,7 @@ int main() {
 
             // Window closed: forget the key and every card number before anything else happens.
             cards.lock();
+            auth.lock();
             keys.lock();
             if (!lockRequested) return 0;  // normal Exit
         }

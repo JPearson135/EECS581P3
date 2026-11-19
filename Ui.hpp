@@ -17,7 +17,11 @@ void addCardForm(const CardSubmit& submit);
 // prefill the shared form for an existing card
 void editCardForm(const CardSubmit& submit, const std::string& label, const std::string& holder,
                   std::string_view number, const std::string& expiry);
-void addAuthenticatorAccountForm();
+                  // one problem found by the authenticator, shown beside its field: 0 = name, 1 = email, 2 = phone, 3 = secret
+struct AuthFormError { int field = 0; std::string message; };
+// receives name, email, phone and the Base32 secret text; an empty message means it was saved
+using AuthSubmit = std::function<AuthFormError(const std::string&, const std::string&, const std::string&, const std::string&)>;
+void addAuthenticatorAccountForm(const AuthSubmit& submit);
 void addPasswordEntryForm();
 bool createPasswordScreen(const std::string& rules, const std::function<std::string(const std::string&, const std::string&)>& submit);
 bool unlockScreen(const std::function<bool(const std::string&)>& unlock);
@@ -60,6 +64,15 @@ public:
     // supply a fresh snapshot on each visit along with the two wallet shortcuts
     void setHomeCards(std::function<HomeCards()> load, Action add, Action view,
                       std::function<void(std::size_t, std::size_t)> move);
+    // one read-only line in a list shown under a section's own rows
+    struct ListRow { std::string title; std::string detail; };
+    struct List {
+        std::string heading;       // for example "Saved accounts"
+        std::string emptyMessage;  // shown instead of rows when the list is empty
+        std::vector<ListRow> rows;
+    };
+    // supply a fresh list every time the section is shown or one of its actions finishes
+    void setList(std::function<List()> load);
     void setWelcome(const std::string& text);
     void run() const;
 
@@ -86,6 +99,7 @@ private:
     std::function<HomeCards()> loadHomeCards_;
     Action addHomeCard_, viewHomeCards_;
     std::function<void(std::size_t, std::size_t)> moveHomeCard_;
+    std::function<List()> loadList_;
     std::vector<Item> items_;
 };
 
