@@ -22,7 +22,9 @@ struct AuthFormError { int field = 0; std::string message; };
 // receives name, email, phone and the Base32 secret text; an empty message means it was saved
 using AuthSubmit = std::function<AuthFormError(const std::string&, const std::string&, const std::string&, const std::string&)>;
 void addAuthenticatorAccountForm(const AuthSubmit& submit);
-void addPasswordEntryForm();
+struct PasswordFormError { int field = 0; std::string message; };
+using PasswordSubmit = std::function<PasswordFormError(const std::string&, const std::string&, const std::string&, const std::string&)>;
+void addPasswordEntryForm(const PasswordSubmit& submit);
 bool createPasswordScreen(const std::string& rules, const std::function<std::string(const std::string&, const std::string&)>& submit);
 bool unlockScreen(const std::function<bool(const std::string&)>& unlock);
 void init();
@@ -33,6 +35,8 @@ void showMessage(const std::string& text, const std::string& iconPath = "");
 void showCardDetails(const std::string& text, const std::string& iconPath,
                      bool starred, const std::function<bool(bool)>& saveStar,
                      const std::function<void()>& edit, const std::function<void()>& reveal);
+void showPasswordDetails(const std::string& text, const std::function<void()>& edit,
+                         const std::function<void()>& reveal);
 // map wallet network metadata to an asset path for display
 const char* cardNetworkIcon(wallet::CardNetwork network);
 void showSecret(const std::string& description, const std::string& secret,

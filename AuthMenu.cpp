@@ -121,9 +121,10 @@ Menu authMenu(Authenticator& auth) {
     Menu menu("Authenticator");
     Authenticator* a = &auth;
     menu.add("Add account", [a] { addAccountScreen(*a); });
-    menu.add("Show codes", [] { notImplemented("Showing authenticator codes"); });
+    menu.add("Show codes (coming soon)",
+             [] { notImplemented("Showing authenticator codes"); });
     menu.add("Delete account", [a] { removeAccountScreen(*a); });
-        // the saved accounts, shown under the rows above (name, then email and/or phone; never the secret)
+    // Show account labels and contacts, but never the secret.
     menu.setList([a] {
         Menu::List list;
         list.heading = "Saved accounts";

@@ -3,7 +3,6 @@
 #include <FL/Fl.H>
 #include <FL/Fl_Window.H>
 #include <exception>
-#include <algorithm>
 #include <functional>
 #include <optional>
 #include <string>
@@ -18,13 +17,6 @@ const char* const kNotLoaded =
 const char* const kSaveFailed =
     "That could not be saved, so nothing was changed. Please try again.";
 
-// Overwrites a string that held a card number, so it does not linger in memory.
-void wipe(std::string& s) {
-    volatile char* p = s.empty() ? nullptr : &s[0];
-    for (std::size_t i = 0; i < s.size(); ++i) p[i] = 0;
-    s.clear();
-}
-
 // Every action starts here: if the cards file failed its check, say so and stop.
 bool ready(const wallet::CardWallet& cards) {
     if (cards.loaded()) return true;
@@ -38,20 +30,6 @@ void guarded(const std::function<void()>& action) {
         action();
     } catch (const std::exception&) {
         showMessage(kSaveFailed);
-    }
-}
-
-// Asks until the answer is acceptable. "problem" returns an explanation, or "" if the answer is fine.
-// Returns false if the user cancels.
-bool askValid(const std::string& prompt, std::string& out, bool hidden,
-              const std::function<std::string(const std::string&)>& problem, bool expiry = false) {
-    while (true) {
-        const bool answered = hidden ? askHidden(prompt, out, true, true) : (expiry ? askExpiry(prompt, out) : askText(prompt, out));
-        if (!answered) return false;
-        if (hidden) out.erase(std::remove(out.begin(), out.end(), ' '), out.end());
-        const std::string why = problem(out);
-        if (why.empty()) return true;
-        showMessage(why);
     }
 }
 

@@ -703,7 +703,8 @@ struct CardStarControl {
 bool prompt(Kind kind, const std::string& message, std::string* value,
             const std::string& initial = "", bool allowReveal = false, bool readOnly = false,
             bool cardNumber = false, bool expiry = false, const std::string& iconPath = "",
-            CardStarControl* star = nullptr) {
+            CardStarControl* star = nullptr, const std::function<void()>* editAction = nullptr,
+            const std::function<void()>* revealAction = nullptr) {
     Fl_PNG_Image hiddenImage("hidden", hiddenIcon, sizeof(hiddenIcon));
     Fl_PNG_Image visibleImage("visible", visibleIcon, sizeof(visibleIcon));
     // keep four physical pixels per logical pixel for crisp retina rendering.
@@ -836,14 +837,26 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
             if (saved) star->starred = !star->starred;
             refreshStar();
         }));
+    } else if (editAction && revealAction) {
+        auto* edit = new LinkButton(pad, y, 52, 30, "Edit", false);
+        edit->callback(trampoline, bindings.add([win, editAction] {
+            win->hide();
+            (*editAction)();
+        }));
+        auto* reveal = new LinkButton(pad, y, 132, 30, "Show password", false);
+        reveal->position(pad + 64, y);
+        reveal->callback(trampoline, bindings.add([win, revealAction] {
+            win->hide();
+            (*revealAction)();
+        }));
     }
     if (twoButtons) {
         LinkButton* secondary = new LinkButton(width - pad - primaryW - 28 - secondaryW, y,
                                                secondaryW, 30, secondaryText, false);
         secondary->callback(trampoline, bindings.add(cancel));
     }
-    if (field) field->callback(trampoline, bindings.add(accept));
-    dialog.onEnter = accept;
+    if (field && !readOnly) field->callback(trampoline, bindings.add(accept));
+    if (!readOnly) dialog.onEnter = accept;
 
     dialog.end();
     centre(dialog);
@@ -1178,7 +1191,7 @@ void addAuthenticatorAccountForm(const AuthSubmit& submit) {
     clearFields();
 }
 
-void addPasswordEntryForm() {
+void addPasswordEntryForm(const PasswordSubmit& onSubmit) {
     Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
     Fl_PNG_Image visibleSource("visible", visibleIcon, sizeof(visibleIcon));
     std::unique_ptr<Fl_Image> hidden = makeIcon(hiddenSource, 96);
@@ -1189,17 +1202,17 @@ void addPasswordEntryForm() {
     dialog.color(bgColor());
     dialog.set_modal();
     new Text(40, 28, 460, 36, "Add password entry", 26, textColor());
-    new Text(40, 70, 460, 38, "UI preview only — entries are not saved yet.",
+    new Text(40, 70, 460, 38, "Entries are encrypted in your vault.",
              14, mutedColor());
 
-    new Text(40, 126, 460, 24, "Site or service", 15, mutedColor());
-    auto* site = new Field<Fl_Input>(40, 154, 460, 34);
-    new Text(40, 204, 460, 24, "Username or email", 15, mutedColor());
-    auto* username = new Field<Fl_Input>(40, 232, 460, 34);
-    new Text(40, 282, 400, 24, "Password", 15, mutedColor());
-    auto* password = new Field<Fl_Secret_Input>(40, 310, 408, 34);
+    new Text(40, 112, 460, 24, "Site or service", 15, mutedColor());
+    auto* site = new Field<Fl_Input>(40, 140, 460, 34);
+    new Text(40, 200, 460, 24, "Username or email", 15, mutedColor());
+    auto* username = new Field<Fl_Input>(40, 228, 460, 34);
+    new Text(40, 288, 400, 24, "Password", 15, mutedColor());
+    auto* password = new Field<Fl_Secret_Input>(40, 316, 408, 34);
 
-    auto* eye = new EyeButton(456, 305, 44, 44);
+    auto* eye = new EyeButton(456, 311, 44, 44);
     eye->insideField = true;
     eye->inputOwner = password;
     eye->color(bgColor());
@@ -1214,30 +1227,61 @@ void addPasswordEntryForm() {
         eye->redraw();
     }));
 
-    new Text(40, 362, 460, 24, "Notes (optional)", 15, mutedColor());
-    auto* notes = new Field<Fl_Input>(40, 390, 460, 34);
-    auto clearAndClose = [&] {
+    new Text(40, 376, 460, 24, "Notes (optional)", 15, mutedColor());
+    auto* notes = new Field<Fl_Input>(40, 404, 460, 34);
+    const int errorY[] = {178, 266, 354, 442};
+    Fl_Box* errors[4];
+    for (int i = 0; i < 4; ++i) {
+        errors[i] = new Fl_Box(40, errorY[i], 460, 30);
+        errors[i]->labelsize(13);
+        errors[i]->labelcolor(accentColor());
+        errors[i]->align(FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_INSIDE | FL_ALIGN_WRAP);
+        errors[i]->hide();
+    }
+    auto clearFields = [&] {
         site->value("");
         username->value("");
         password->value("");
         notes->value("");
+    };
+    auto close = [&] {
+        clearFields();
         dialog.hide();
     };
-    auto submit = [&] {
-        clearAndClose();
-        notImplemented("Saving password entries");
+    auto submitForm = [&] {
+        for (auto* error : errors) {
+            error->copy_label("");
+            error->hide();
+        }
+        std::string passwordText = password->value();
+        PasswordFormError problem;
+        try {
+            problem = onSubmit(site->value(), username->value(), passwordText, notes->value());
+        } catch (const std::exception&) {
+            problem = {0, "Could not save this entry. Please try again."};
+        }
+        std::fill(passwordText.begin(), passwordText.end(), '\0');
+        if (problem.message.empty()) {
+            close();
+            showMessage("Password entry saved.");
+            return;
+        }
+        const int at = std::clamp(problem.field, 0, 3);
+        errors[at]->copy_label(problem.message.c_str());
+        errors[at]->show();
+        dialog.redraw();
     };
     auto* cancel = new LinkButton(240, 520, 80, 30, "Cancel", false);
-    cancel->callback(trampoline, bindings.add(clearAndClose));
+    cancel->callback(trampoline, bindings.add(close));
     auto* addButton = new LinkButton(350, 520, 150, 30, "Add entry", true);
-    addButton->callback(trampoline, bindings.add(submit));
-    dialog.onEnter = submit;
+    addButton->callback(trampoline, bindings.add(submitForm));
+    dialog.onEnter = submitForm;
     dialog.end();
     centre(dialog);
     dialog.show();
     site->take_focus();
     while (dialog.shown()) Fl::wait();
-    password->value("");
+    clearFields();
 }
 
 // first-time setup with both password fields on the same screen
@@ -1448,6 +1492,11 @@ void showCardDetails(const std::string& text, const std::string& iconPath,
                      const std::function<void()>& edit, const std::function<void()>& reveal) {
     CardStarControl star{starred, saveStar, edit, reveal};
     prompt(Kind::Message, text, nullptr, "", false, false, false, false, iconPath, &star);
+}
+
+void showPasswordDetails(const std::string& text, const std::function<void()>& edit,
+                         const std::function<void()>& reveal) {
+    prompt(Kind::Message, text, nullptr, "", false, false, false, false, "", nullptr, &edit, &reveal);
 }
 
 const char* cardNetworkIcon(wallet::CardNetwork network) {
