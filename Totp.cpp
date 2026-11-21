@@ -6,6 +6,13 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <cstdint>
+#include <cstdio>
+#include <ctime>
+#include <memory>
+#include <openssl/core_names.h>
+#include <openssl/evp.h>
+#include <openssl/params.h>
 
 namespace {
 
@@ -41,6 +48,55 @@ void wipeBytes(std::vector<std::uint8_t>& bytes) {
     volatile std::uint8_t* p = bytes.empty() ? nullptr : bytes.data();
     for (std::size_t i = 0; i < bytes.size(); ++i) p[i] = 0;
     bytes.clear();
+}
+
+// HMAC-SHA1 of `data` using `key`. Returns the 20-byte digest.
+std::vector<std::uint8_t> hmacSha1(const std::vector<std::uint8_t>& key,
+                                   const unsigned char* data, std::size_t dataSize) {
+    EVP_MAC* mac = EVP_MAC_fetch(nullptr, "HMAC", nullptr);
+    if (!mac) throw std::runtime_error("EVP_MAC_fetch failed");
+    EVP_MAC_CTX* ctx = EVP_MAC_CTX_new(mac);
+    if (!ctx) {
+        EVP_MAC_free(mac);
+        throw std::runtime_error("EVP_MAC_CTX_new failed");
+    }
+
+    OSSL_PARAM params[2] = {
+        OSSL_PARAM_construct_utf8_string(OSSL_MAC_PARAM_DIGEST, const_cast<char*>("SHA1"), 0),
+        OSSL_PARAM_construct_end()};
+
+    unsigned char out[EVP_MAX_MD_SIZE];
+    std::size_t len = 0;
+
+    const bool ok = EVP_MAC_init(ctx, key.data(), key.size(), params) &&
+                    EVP_MAC_update(ctx, data, dataSize) &&
+                    EVP_MAC_final(ctx, out, &len, sizeof(out));
+
+    EVP_MAC_CTX_free(ctx);
+    EVP_MAC_free(mac);
+    if (!ok || len != 20) throw std::runtime_error("HMAC-SHA1 failed");
+    return std::vector<std::uint8_t>(out, out + len);
+}
+
+// RFC 6238 / RFC 4226: 6-digit code for a given Unix time (30-second steps).
+int generateOtp(const std::vector<std::uint8_t>& secret, std::time_t now) {
+    std::uint64_t counter = static_cast<std::uint64_t>(now) / 30;
+
+    unsigned char msg[8];
+    for (int i = 7; i >= 0; --i) {
+        msg[i] = static_cast<unsigned char>(counter & 0xFF);
+        counter >>= 8;
+    }
+
+    const auto hash = hmacSha1(secret, msg, sizeof(msg));
+
+    const int offset = hash[19] & 0x0F;  // last byte of the 20-byte digest
+    const std::uint32_t binCode =
+        (static_cast<std::uint32_t>(hash[offset] & 0x7F) << 24) |
+        (static_cast<std::uint32_t>(hash[offset + 1]) << 16) |
+        (static_cast<std::uint32_t>(hash[offset + 2]) << 8) |
+        static_cast<std::uint32_t>(hash[offset + 3]);
+    return static_cast<int>(binCode % 1000000);
 }
 
 // File-format helper: writes a number as 4 bytes, biggest byte first ("big-endian"), and moves the write pointer forward.
@@ -388,9 +444,11 @@ bool Authenticator::removeAccount(const std::string& name) {
     return false;
 }
 
-std::string Authenticator::currentCode(const AuthAccount& account){
-    return "placeholder";
+std::string Authenticator::currentCode(const AuthAccount& account) {
+    char buf[8];
+    std::snprintf(buf, sizeof(buf), "%06d", generateOtp(account.secret, std::time(nullptr)));
+    return buf;
 }
-int Authenticator::secondsRemaining(){
-    return 0;
+int Authenticator::secondsRemaining() {
+    return 30 - static_cast<int>(std::time(nullptr) % 30);
 }

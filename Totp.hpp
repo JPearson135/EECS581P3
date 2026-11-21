@@ -3,6 +3,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <map>
 #include <optional>
 #include <string>
@@ -82,8 +83,10 @@ public:
     // Throws std::runtime_error if load() has not succeeded.
     std::vector<AuthSummary> list() const;
 
-    std::string currentCode(const AuthAccount& account);
-    int secondsRemaining();
+    std::optional<std::string> currentCode(std::string_view name,
+                                       std::time_t now = std::time(nullptr)) const;
+
+    static int secondsRemaining(std::time_t now = std::time(nullptr));
 
     // ---- Checks, public so they can be tested on their own ----
     static bool validName(std::string_view name);
