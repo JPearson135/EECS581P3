@@ -3,6 +3,7 @@
 #include "Ui.hpp"
 #include "IdleTimer.hpp"
 #include "Wallet.hpp"
+#include "Totp.hpp"
 #include <ctime>
 #include <openssl/crypto.h>
 #include <FL/Fl.H>
@@ -477,6 +478,13 @@ class Field : public Base {
 public:
     // keep embedded icons visible when the input repaints
     EyeButton* embeddedEye = nullptr;
+    std::function<void()> validateOnBlur, validateOnEdit;
+    int handle(int event) override {
+        const int used = Base::handle(event);
+        if (event == FL_UNFOCUS && validateOnBlur) validateOnBlur();
+        if ((event == FL_KEYBOARD || event == FL_PASTE) && validateOnEdit) validateOnEdit();
+        return used;
+    }
     Field(int x, int y, int w, int h) : Base(x, y, w, h) {
         this->box(FL_FLAT_BOX);
         this->color(surfaceColor());
@@ -594,6 +602,70 @@ public:
 };
 
 // add the expiry slash while the user types
+// format local phone numbers while keeping the cursor tied to the entered digits
+class PhoneField : public Field<Fl_Input> {
+public:
+    using Field<Fl_Input>::Field;
+    void draw() override {
+        Field<Fl_Input>::draw();
+        if (!value()[0]) {
+            fl_font(textfont(), textsize());
+            fl_color(mutedColor());
+            fl_draw("(123) 456-7890", x() + 3, y(), w() - 6, h(),
+                    FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
+        }
+    }
+
+    int handle(int event) override {
+        if (event == FL_KEYBOARD && Fl::event_key() == FL_BackSpace && position() == mark()) {
+            int cursor = position();
+            while (cursor > 0 && (value()[cursor - 1] == ' ' ||
+                   value()[cursor - 1] == ')' || value()[cursor - 1] == '-')) --cursor;
+            if (cursor != position()) position(cursor);
+        }
+        const int used = Field<Fl_Input>::handle(event);
+        if (event != FL_KEYBOARD && event != FL_PASTE) return used;
+        std::string digits;
+        int before = 0;
+        const int cursor = position();
+        for (int i = 0; value()[i]; ++i) {
+            const char c = value()[i];
+            if (c >= '0' && c <= '9') {
+                digits += c;
+                if (i < cursor) ++before;
+            } else if (c != '(' && c != ')' && c != ' ' && c != '-' && c != '.') {
+                return used;
+            }
+        }
+        // leave longer and international numbers to the existing feature validation
+        if (digits.size() > 10) return used;
+        std::string formatted;
+        int next = 0;
+        for (std::size_t i = 0; i < digits.size(); ++i) {
+            if (i == 0) formatted += '(';
+            if (i == 3) formatted += ") ";
+            if (i == 6) formatted += '-';
+            formatted += digits[i];
+            if (static_cast<int>(i) < before) next = static_cast<int>(formatted.size());
+        }
+        const bool inserting = event == FL_PASTE ||
+            (Fl::event_length() > 0 && Fl::event_key() != FL_BackSpace &&
+             Fl::event_key() != FL_Delete);
+        if (inserting && digits.size() == 3) {
+            formatted += ") ";
+            if (before == 3) next = static_cast<int>(formatted.size());
+        } else if (inserting && digits.size() == 6) {
+            formatted += '-';
+            if (before == 6) next = static_cast<int>(formatted.size());
+        }
+        if (formatted != value()) {
+            value(formatted.c_str());
+            position(next);
+        }
+        return used;
+    }
+};
+
 class ExpiryField : public Field<Fl_Input> {
 public:
     std::function<void()> onBlur, onEdit;
@@ -1124,7 +1196,7 @@ void addAuthenticatorAccountForm(const AuthSubmit& submit) {
     dialog.set_modal();
     new Text(40, 28, 460, 36, "Add authenticator account", 26, textColor());
     new Text(40, 66, 460, 20, "Enter an email address, a phone number, or both.", 14, mutedColor());
-    const char* labels[] = {"Account Name", "Email", "Phone Number", "Base32 Secret"};
+    const char* labels[] = {"Account Name", "Email", "Phone Number (US/Canada)", "Base32 Secret"};
     Fl_Input* fields[4];
     Fl_Box* errors[4];
     Fl_Box* warnings[4];
@@ -1132,7 +1204,8 @@ void addAuthenticatorAccountForm(const AuthSubmit& submit) {
         int y = 92 + i * 118;
         new Text(40, y, 460, 24, labels[i], 15, mutedColor());
         // the secret is hidden by default and leaves room for the show/hide button
-        if (i == 3) fields[i] = new Field<Fl_Secret_Input>(40, y + 30, 368, 34);
+        if (i == 3) fields[i] = new Field<Fl_Secret_Input>(40, y + 30, 416, 34);
+        else if (i == 2) fields[i] = new PhoneField(40, y + 30, 416, 34);
         else fields[i] = new Field<Fl_Input>(40, y + 30, 416, 34);
         // show the warning beside its field and the explanation below it
         warnings[i] = new Fl_Box(468, y + 35, 24, 24);
@@ -1144,7 +1217,8 @@ void addAuthenticatorAccountForm(const AuthSubmit& submit) {
         errors[i]->align(FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_INSIDE | FL_ALIGN_WRAP);
     }
     Fl_Input* secret = fields[3];
-    auto* eye = new EyeButton(416, 471, 44, 44);
+    auto* eye = new EyeButton(412, 471, 44, 44);
+    static_cast<Field<Fl_Secret_Input>*>(secret)->embeddedEye = eye;
     eye->insideField = true;
     eye->inputOwner = secret;
     eye->color(bgColor());
@@ -1159,6 +1233,40 @@ void addAuthenticatorAccountForm(const AuthSubmit& submit) {
         eye->redraw();
     }));
 
+    // defer warnings until leaving a field and clear them as valid input is entered
+    bool checked[4] = {};
+    bool touched[4] = {};
+    auto checkField = [&](int index) {
+        std::string message;
+        const std::string_view value(fields[index]->value());
+        if (index == 0 && !Authenticator::validName(value))
+            message = "Enter an account name.";
+        if (index == 1 && !value.empty() && !Authenticator::validEmail(value))
+            message = "Enter a valid email address.";
+        if (index == 2 && !value.empty() && !Authenticator::validPhone(value))
+            message = "Enter a valid phone number.";
+        if ((index == 1 || index == 2) && !fields[1]->value()[0] && !fields[2]->value()[0])
+            message = "Enter an email address or a phone number.";
+        if (index == 3) message = Authenticator::setupKeyProblem(value);
+        errors[index]->copy_label(message.c_str());
+        if (message.empty()) warnings[index]->hide(); else warnings[index]->show();
+        dialog.redraw();
+    };
+    auto connectValidation = [&](auto* field, int i) {
+        field->validateOnBlur = [&, i] {
+            if (!touched[i]) return;
+            checked[i] = true;
+            checkField(i);
+        };
+        field->validateOnEdit = [&, i] {
+            if (fields[i]->value()[0]) touched[i] = true;
+            if (checked[i]) checkField(i);
+            if ((i == 1 || i == 2) && checked[3 - i]) checkField(3 - i);
+        };
+    };
+    for (int i = 0; i < 3; ++i)
+        connectValidation(static_cast<Field<Fl_Input>*>(fields[i]), i);
+    connectValidation(static_cast<Field<Fl_Secret_Input>*>(fields[3]), 3);
     auto clearFields = [&] { for (auto* field : fields) field->value(""); };
     auto close = [&] {
         clearFields();
@@ -1173,6 +1281,7 @@ void addAuthenticatorAccountForm(const AuthSubmit& submit) {
         std::fill(secretText.begin(), secretText.end(), '\0');
         if (problem.message.empty()) { close(); return; }
         const int at = std::clamp(problem.field, 0, 3);
+        checked[at] = true;
         errors[at]->copy_label(problem.message.c_str());
         warnings[at]->show();
         dialog.redraw();

@@ -79,44 +79,25 @@ struct Reader {
 
 // ------------------------------------------------------------------ checks
 
-// A name must be 1-40 characters, no control characters, and no space at the start or end.
+// accept a meaningful account name and a simple address with one at sign
 bool Authenticator::validName(std::string_view name) {
-    if (name.empty() || name.size() > kMaxName || hasControlChar(name)) return false;
-    return name.front() != ' ' && name.back() != ' ';
+    return !name.empty() && name.size() <= kMaxName && !hasControlChar(name) &&
+        name.find_first_not_of(' ') != std::string_view::npos;
 }
 
-// Practical email check: exactly one '@'; a local part of 1-64 allowed characters with no leading,
-// trailing or doubled dots; a domain made of dot-separated labels (letters, digits, inner hyphens)
-// with at least one dot and a last label of 2+ characters.
 bool Authenticator::validEmail(std::string_view email) {
-    if (email.empty() || email.size() > kMaxEmail) return false;
-    const std::size_t at = email.find('@');
-    if (at == std::string_view::npos || at != email.rfind('@')) return false;
+    if (email.empty() || email.size() > kMaxEmail || hasControlChar(email) ||
+        email.find(' ') != std::string_view::npos) return false;
+    const auto at = email.find('@');
+    return at != std::string_view::npos && at > 0 && at + 1 < email.size() &&
+        at == email.rfind('@');
+}
 
-    const std::string_view local = email.substr(0, at);
-    const std::string_view domain = email.substr(at + 1);
-
-    if (local.empty() || local.size() > 64) return false;
-    if (local.front() == '.' || local.back() == '.' || local.find("..") != std::string_view::npos)
-        return false;
-    constexpr std::string_view kLocalSymbols = "!#$%&'*+/=?^_`{|}~.-";
-    for (char c : local)
-        if (!isAlnum(c) && kLocalSymbols.find(c) == std::string_view::npos) return false;
-
-    if (domain.find('.') == std::string_view::npos) return false;
-    std::size_t labelLen = 0;
-    for (std::size_t i = 0; i < domain.size(); ++i) {
-        const char c = domain[i];
-        if (c == '.') {
-            if (labelLen == 0 || domain[i - 1] == '-') return false;  // empty label or label ending in '-'
-            labelLen = 0;
-            continue;
-        }
-        if (!isAlnum(c) && c != '-') return false;
-        if (c == '-' && labelLen == 0) return false;                   // label starting with '-'
-        if (++labelLen > 63) return false;
-    }
-    return labelLen >= 2 && domain.back() != '-';
+// new accounts use local ten-digit numbers; legacy normalization remains readable
+bool Authenticator::validPhone(std::string_view phone) {
+    const auto normalized = normalizePhone(phone);
+    return normalized && normalized->size() == 10 &&
+        normalized->find_first_not_of("0123456789") == std::string::npos;
 }
 
 // Accepts an optional leading '+' and 7-15 digits (the international maximum). Spaces, dashes,
@@ -179,6 +160,20 @@ std::optional<std::vector<std::uint8_t>> Authenticator::decodeBase32(std::string
         return std::nullopt;
     }
     return out;
+}
+
+// report format errors through the same decoder used when adding accounts
+std::string Authenticator::setupKeyProblem(std::string_view text) {
+    for (char c : text) {
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '2' && c <= '7') || c == ' ' || c == '-' || c == '=') continue;
+        return "Enter a valid setup key using letters A–Z and digits 2–7.";
+    }
+    auto decoded = decodeBase32(text);
+    if (!decoded) return "Check the setup key’s length.";
+    const bool valid = validSecret(*decoded);
+    wipeBytes(*decoded);
+    return valid ? "" : "Check the setup key’s length.";
 }
 
 bool Authenticator::hasName(std::string_view name) const {
@@ -341,6 +336,7 @@ AuthAddResult Authenticator::addAccount(const AuthAccount& account) {
     if (!loaded_) throw std::runtime_error("Authenticator is not loaded");
     if (!validName(account.name)) return AuthAddResult::BadName;
     if (hasName(account.name)) return AuthAddResult::DuplicateName;
+    if (!account.phone.empty() && !validPhone(account.phone)) return AuthAddResult::BadPhone;
 
     std::string phone;
     const AuthAddResult checked = checkFields(account, phone);

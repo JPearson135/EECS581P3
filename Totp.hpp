@@ -87,10 +87,12 @@ public:
 
     // ---- Checks, public so they can be tested on their own ----
     static bool validName(std::string_view name);
+    static bool validPhone(std::string_view phone);
     static bool validEmail(std::string_view email);
     // Accepts an optional leading '+' and 7-15 digits; spaces, dashes, dots and parentheses are
     // ignored. Returns "+" (if given) followed by the digits only, or nothing if not valid.
     static std::optional<std::string> normalizePhone(std::string_view phone);
+    static std::string setupKeyProblem(std::string_view text);
     static bool validSecret(const std::vector<std::uint8_t>& secret);
     // Base32 text (A-Z, 2-7, any capitalisation; spaces, dashes and trailing '=' are ignored)
     // -> raw secret bytes. Returns nothing for any other character or an impossible length.

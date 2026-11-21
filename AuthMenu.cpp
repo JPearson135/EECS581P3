@@ -62,12 +62,12 @@ AuthSubmit submitAccount(Authenticator& auth) {
 
         switch (auth.addAccount(account)) {
             case AuthAddResult::Added: return {};
-            case AuthAddResult::BadName: return {0, "Use 1–40 characters, without leading or trailing spaces."};
+            case AuthAddResult::BadName: return {0, "Enter an account name."};
             case AuthAddResult::DuplicateName: return {0, "An account with this name already exists. Choose a different name."};
             case AuthAddResult::NoContact: return {1, "Enter an email address or a phone number."};
-            case AuthAddResult::BadEmail: return {1, "Enter a valid email address, for example name@example.com."};
-            case AuthAddResult::BadPhone: return {2, "Enter a valid phone number: 7–15 digits, optionally starting with +."};
-            case AuthAddResult::BadSecret: return {3, "Check the secret key: use Base32 characters (A–Z and 2–7), at least 16 of them."};
+            case AuthAddResult::BadEmail: return {1, "Enter a valid email address."};
+            case AuthAddResult::BadPhone: return {2, "Enter a valid phone number."};
+            case AuthAddResult::BadSecret: return {3, Authenticator::setupKeyProblem(secretText)};
             case AuthAddResult::Full: return {0, "The authenticator is full. Remove an account first."};
         }
         return {0, "Could not add this account."};
