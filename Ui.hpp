@@ -24,7 +24,10 @@ using AuthSubmit = std::function<AuthFormError(const std::string&, const std::st
 void addAuthenticatorAccountForm(const AuthSubmit& submit);
 struct PasswordFormError { int field = 0; std::string message; };
 using PasswordSubmit = std::function<PasswordFormError(const std::string&, const std::string&, const std::string&, const std::string&)>;
-void addPasswordEntryForm(const PasswordSubmit& submit);
+void addPasswordEntryForm(const PasswordSubmit& onSubmit,
+                          const std::string& site = "", const std::string& username = "",
+                          std::string_view password = {}, const std::string& notes = "",
+                          const std::function<bool()>& remove = {});
 bool createPasswordScreen(const std::string& rules, const std::function<std::string(const std::string&, const std::string&)>& submit);
 bool unlockScreen(const std::function<bool(const std::string&)>& unlock);
 void init();
@@ -34,7 +37,8 @@ void showMessage(const std::string& text, const std::string& iconPath = "");
 // let the caller supply separate actions for starring, editing, and revealing
 void showCardDetails(const std::string& text, const std::string& iconPath,
                      bool starred, const std::function<bool(bool)>& saveStar,
-                     const std::function<void()>& edit, const std::function<void()>& reveal);
+                     const std::function<void()>& edit, const std::function<void()>& reveal,
+                     const char* revealLabel = "Show number");
 void showPasswordDetails(const std::string& text, const std::function<void()>& edit,
                          const std::function<void()>& reveal);
 // map wallet network metadata to an asset path for display
@@ -58,6 +62,7 @@ public:
         std::string label;
         std::string iconPath;
         Action open;
+        std::string searchText;
     };
     // distinguish a wallet that failed to load from an empty wallet or one with no favorites
     struct HomeCards {
@@ -69,7 +74,7 @@ public:
     void setHomeCards(std::function<HomeCards()> load, Action add, Action view,
                       std::function<void(std::size_t, std::size_t)> move);
     // one read-only line in a list shown under a section's own rows
-    struct ListRow { std::string title; std::string detail; };
+    struct ListRow { std::string title; std::string detail; Action open; bool starred = false; };
     struct List {
         std::string heading;       // for example "Saved accounts"
         std::string emptyMessage;  // shown instead of rows when the list is empty
@@ -77,6 +82,8 @@ public:
     };
     // supply a fresh list every time the section is shown or one of its actions finishes
     void setList(std::function<List()> load);
+    // password home rows contain safe account summaries and existing details actions
+    void setHomePasswords(std::function<HomeCards()> load, Action add);
     void setWelcome(const std::string& text);
     void run() const;
 
@@ -102,6 +109,8 @@ private:
     // store callbacks so the menu can refresh without keeping a wallet reference
     std::function<HomeCards()> loadHomeCards_;
     Action addHomeCard_, viewHomeCards_;
+    std::function<HomeCards()> loadHomePasswords_;
+    Action addHomePassword_;
     std::function<void(std::size_t, std::size_t)> moveHomeCard_;
     std::function<List()> loadList_;
     std::vector<Item> items_;

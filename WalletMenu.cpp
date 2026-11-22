@@ -144,7 +144,8 @@ void configureWalletHome(Menu& menu, wallet::CardWallet& cards) {
             // send only the nickname, last four digits, logo, and a label-based action to home
             home.favorites.push_back({card.label + "    •••• " + card.masked.substr(card.masked.size() - 4),
                                       cardNetworkIcon(card.network),
-                                      [&cards, label = card.label] { openCard(cards, label); }});
+                                      [&cards, label = card.label] { openCard(cards, label); },
+                                      card.label + " " + card.holder});
         }
         return home;
     }, [&cards] { addCard(cards); }, [&cards] { viewCards(cards); },

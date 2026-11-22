@@ -98,13 +98,14 @@ bool PasswordManager::validNotes(std::string_view s) {
 // Entries in memory -> one block of bytes. This block is what gets encrypted.
 security::SecretBytes PasswordManager::serialize() const {
     // Exact size first, so we write straight into one SecretBytes with no leftover copies.
-    std::size_t total = kMagicSize + 4;
+    const bool hasStars = std::any_of(entries_.begin(), entries_.end(), [](const Entry& e) { return e.starred; });
+    std::size_t total = kMagicSize + 4 + (hasStars ? entries_.size() : 0);
     for (const Entry& e : entries_)
         total += 16 + e.site.size() + e.username.size() + e.password.size() + e.notes.size();
  
     security::SecretBytes out(total);
     unsigned char* p = out.data();
-    putBytes(p, reinterpret_cast<const unsigned char*>(kMagic), kMagicSize);
+    putBytes(p, reinterpret_cast<const unsigned char*>(hasStars ? "DWPASS02" : kMagic), kMagicSize);
  
     putU32(p, entries_.size());
     for (const Entry& e : entries_) {
@@ -116,6 +117,7 @@ security::SecretBytes PasswordManager::serialize() const {
         putBytes(p, e.password.data(), e.password.size());
         putU32(p, e.notes.size());
         putBytes(p, reinterpret_cast<const unsigned char*>(e.notes.data()), e.notes.size());
+        if (hasStars) *p++ = e.starred ? 1 : 0;
     }
     return out;
 }
@@ -129,7 +131,8 @@ std::optional<std::vector<PasswordManager::Entry>> PasswordManager::parse(const 
 
     // Check the 8-letter tag, then the entry count (capped at kMaxEntries).
     if (!in.bytes(kMagicSize, magic)) return std::nullopt;
-    if (!std::equal(magic, magic + kMagicSize, reinterpret_cast<const unsigned char*>(kMagic)) ||
+    const bool hasStars = std::equal(magic, magic + kMagicSize, reinterpret_cast<const unsigned char*>("DWPASS02"));
+    if ((!hasStars && !std::equal(magic, magic + kMagicSize, reinterpret_cast<const unsigned char*>(kMagic))) ||
         !in.u32(count) || count > kMaxEntries)
         return std::nullopt;
 
@@ -144,6 +147,11 @@ std::optional<std::vector<PasswordManager::Entry>> PasswordManager::parse(const 
             if (!in.u32(length[f]) || !in.bytes(length[f], field[f])) return std::nullopt;
 
         Entry entry;
+        if (hasStars) {
+            const unsigned char* flag = nullptr;
+            if (!in.bytes(1, flag) || *flag > 1) return std::nullopt;
+            entry.starred = *flag == 1;
+        }
         entry.site.assign(reinterpret_cast<const char*>(field[0]), length[0]);
         entry.username.assign(reinterpret_cast<const char*>(field[1]), length[1]);
         entry.notes.assign(reinterpret_cast<const char*>(field[3]), length[3]);
@@ -290,11 +298,13 @@ std::vector<EntrySummary> PasswordManager::list() const {
     out.reserve(entries_.size());
     for (const Entry& e : entries_) {
         EntrySummary s;
+        s.starred = e.starred;
         s.site = e.site;
         s.username = e.username;
         s.notes = e.notes;
         out.push_back(std::move(s));
     }
+    std::stable_partition(out.begin(), out.end(), [](const EntrySummary& e) { return e.starred; });
     return out;
 }
 
@@ -308,6 +318,42 @@ std::optional<security::SecretBytes> PasswordManager::revealPassword(std::string
 
     const security::SecretBytes& src = entries_[i].password;
     return security::SecretBytes(src.data(), src.size());
+}
+
+// save preferences and edits through the feature layer with rollback on failure
+bool PasswordManager::setStarred(std::string_view site, std::string_view username, bool starred) {
+    if (!loaded_) throw std::runtime_error("Password manager is locked");
+    const int index = indexOf(site, username);
+    if (index < 0) return false;
+    auto& entry = entries_[index];
+    const bool previous = entry.starred;
+    if (previous == starred) return true;
+    entry.starred = starred;
+    try { save(); } catch (...) { entry.starred = previous; throw; }
+    return true;
+}
+
+AddResult PasswordManager::update(std::string_view oldSite, std::string_view oldUsername,
+                                  std::string_view site, std::string_view username,
+                                  std::string_view password, std::string_view notes) {
+    if (!loaded_) throw std::runtime_error("Password manager is locked");
+    const int index = indexOf(oldSite, oldUsername);
+    if (index < 0) throw std::runtime_error("Entry no longer exists");
+    if (!validSite(site)) return AddResult::BadSite;
+    if (!validUsername(username)) return AddResult::BadUsername;
+    if (!validPassword(password)) return AddResult::BadPassword;
+    if (!validNotes(notes)) return AddResult::BadNotes;
+    const int duplicate = indexOf(site, username);
+    if (duplicate >= 0 && duplicate != index) return AddResult::Duplicate;
+    Entry replacement;
+    replacement.site = site;
+    replacement.username = username;
+    replacement.notes = notes;
+    replacement.password = security::SecretBytes(reinterpret_cast<const unsigned char*>(password.data()), password.size());
+    replacement.starred = entries_[index].starred;
+    std::swap(replacement, entries_[index]);
+    try { save(); } catch (...) { std::swap(replacement, entries_[index]); throw; }
+    return AddResult::Added;
 }
 
 // ------------------------------------------------------------------ password generator

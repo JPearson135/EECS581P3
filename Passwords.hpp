@@ -30,6 +30,7 @@ enum class AddResult {
  
 // Safe-to-show view of an entry. The password is never in here.
 struct EntrySummary {
+    bool starred = false;
     std::string site;
     std::string username;
     std::string notes;
@@ -70,6 +71,10 @@ public:
     AddResult add(std::string_view site, std::string_view username,
                   std::string_view password, std::string_view notes);
     // TODO: implement in Passwords.cpp. Erase the entry and save; put it back if the save fails.
+    bool setStarred(std::string_view site, std::string_view username, bool starred);
+    AddResult update(std::string_view oldSite, std::string_view oldUsername,
+                     std::string_view site, std::string_view username,
+                     std::string_view password, std::string_view notes);
     bool remove(std::string_view site, std::string_view username);
     // TODO: implement in Passwords.cpp. Replace the password and save; restore the old one if the save fails.
     // Returns false if the entry is missing; throws if the new password is invalid.
@@ -95,6 +100,7 @@ private:
         std::string username;
         std::string notes;
         security::SecretBytes password;
+        bool starred = false;
     };
  
     security::SecretBytes serialize() const;

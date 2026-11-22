@@ -40,10 +40,12 @@ void guarded(const std::function<void()>& action) {
     }
 }
 
-PasswordSubmit addEntrySubmit(passwords::PasswordManager& manager) {
-    return [&manager](const std::string& site, const std::string& username,
+PasswordSubmit entrySubmit(passwords::PasswordManager& manager,
+                           std::optional<passwords::EntrySummary> original = {}) {
+    return [&manager, original](const std::string& site, const std::string& username,
                       const std::string& password, const std::string& notes) {
-        switch (manager.add(site, username, password, notes)) {
+        switch (original ? manager.update(original->site, original->username, site, username, password, notes)
+                         : manager.add(site, username, password, notes)) {
             case passwords::AddResult::Added: return PasswordFormError{};
             case passwords::AddResult::BadSite:
                 return PasswordFormError{0, "Use 1–60 characters, without leading or trailing spaces."};
@@ -110,78 +112,33 @@ std::optional<passwords::EntrySummary> pickEntry(
     return chosen;
 }
 
-void changeEntryPassword(passwords::PasswordManager& manager,
-                         const passwords::EntrySummary& entry);
+void editEntry(passwords::PasswordManager& manager, const passwords::EntrySummary& entry) {
+    guarded([&] {
+        const auto password = manager.revealPassword(entry.site, entry.username);
+        if (!password) return;
+        addPasswordEntryForm(entrySubmit(manager, entry), entry.site, entry.username,
+                             password->view(), entry.notes,
+                             [&] { return manager.remove(entry.site, entry.username); });
+    });
+}
 
+// reuse the card-style controls so viewing, editing, and revealing stay separate
 void viewEntry(passwords::PasswordManager& manager, const passwords::EntrySummary& entry) {
-    std::string details = "Site: " + entry.site + "\nUsername: " + entry.username;
-    if (!entry.notes.empty()) details += "\nNotes: " + entry.notes;
-    const auto edit = [&manager, &entry] { changeEntryPassword(manager, entry); };
-    const auto reveal = [&manager, &entry] {
-        if (auto secret = manager.revealPassword(entry.site, entry.username)) {
-            SensitiveText text;
-            text.value.assign(secret->view());
-            showSecret(entry.site + " — Password", text.value);
-        } else {
-            showMessage("That password entry no longer exists.");
-        }
-    };
-    showPasswordDetails(details, edit, reveal);
-}
-
-void addEntry(passwords::PasswordManager& manager) {
-    if (!ready(manager)) return;
-    addPasswordEntryForm(addEntrySubmit(manager));
-}
-
-void viewEntries(passwords::PasswordManager& manager) {
-    if (!ready(manager)) return;
-    if (const auto entry = pickEntry(manager, "View entries")) {
-        guarded([&] { viewEntry(manager, *entry); });
-    }
-}
-
-void changeEntryPassword(passwords::PasswordManager& manager,
-                         const passwords::EntrySummary& entry) {
-    SensitiveText password;
-    if (!askHidden("New password for " + entry.site + " (" + entry.username + "):",
-                   password.value, true))
-        return;
-    if (!passwords::PasswordManager::validPassword(password.value)) {
-        showMessage("Use 1–128 characters and no control characters.");
-        return;
-    }
     guarded([&] {
-        if (manager.changePassword(entry.site, entry.username, password.value))
-            showMessage("Password updated.");
-        else
-            showMessage("That password entry no longer exists.");
+        const std::string details = "Site: " + entry.site + "\nUsername: " + entry.username +
+            (entry.notes.empty() ? "" : "\nNotes: " + entry.notes);
+        showCardDetails(details, "", entry.starred,
+            [&](bool starred) { return manager.setStarred(entry.site, entry.username, starred); },
+            [&] { editEntry(manager, entry); },
+            [&] {
+                if (const auto secret = manager.revealPassword(entry.site, entry.username)) {
+                    SensitiveText text;
+                    text.value.assign(secret->view());
+                    showSecret(entry.site + " — Password", text.value);
+                }
+            }, "Show password");
     });
 }
-
-void deleteEntry(passwords::PasswordManager& manager, const passwords::EntrySummary& entry) {
-    if (!confirm("Delete the entry for \"" + entry.site + "\" and \"" + entry.username +
-                 "\"? This cannot be undone."))
-        return;
-    guarded([&] {
-        if (manager.remove(entry.site, entry.username)) showMessage("Password entry deleted.");
-        else showMessage("That password entry no longer exists.");
-    });
-}
-
-void manageEntry(passwords::PasswordManager& manager) {
-    if (!ready(manager)) return;
-    const auto entry = pickEntry(manager, "Edit or delete entry");
-    if (!entry) return;
-
-    Menu actions("Manage password entry");
-    actions.add("Change password", [&manager, entry] { changeEntryPassword(manager, *entry); });
-    actions.add("Delete entry", [&manager, entry] { deleteEntry(manager, *entry); });
-    Menu host("Password Manager");
-    host.addSubmenu("Manage entry", std::move(actions));
-    host.invoke(0);
-}
-
 void searchEntries(passwords::PasswordManager& manager) {
     if (!ready(manager)) return;
     std::string query;
@@ -215,31 +172,52 @@ void generatePassword() {
     showSecret("Generated password", text.value);
 }
 
-}  // namespace
+} // namespace
+
+// favorites expose account names and usernames while passwords stay in the feature
+void configurePasswordHome(Menu& menu, passwords::PasswordManager& manager) {
+    auto* p = &manager;
+    menu.setHomePasswords([p] {
+        Menu::HomeCards home;
+        home.available = p->loaded();
+        if (!home.available) return home;
+        const auto entries = p->list();
+        home.hasCards = !entries.empty();
+        for (const auto& entry : entries) {
+            if (entry.starred)
+                home.favorites.push_back({entry.site + "    " + entry.username, "",
+                                          [p, entry] { viewEntry(*p, entry); }, entry.site + " " + entry.username});
+        }
+        return home;
+    }, [p] { if (ready(*p)) addPasswordEntryForm(entrySubmit(*p)); });
+}
 
 Menu passwordMenu(passwords::PasswordManager& manager) {
-    Menu menu("Password Manager");
-    passwords::PasswordManager* p = &manager;
-    menu.add("Add entry", [p] { addEntry(*p); });
-    menu.add("View entries", [p] { viewEntries(*p); });
-    menu.add("Change password or delete entry", [p] { manageEntry(*p); });
+    Menu menu("Passwords");
+    auto* p = &manager;
+    menu.add("Add Password", [p] {
+        if (ready(*p)) addPasswordEntryForm(entrySubmit(*p));
+    });
+    // retain the standalone tools alongside the clickable saved entries
+    menu.add("View entries", [p] {
+        if (!ready(*p)) return;
+        if (const auto entry = pickEntry(*p, "View entries")) viewEntry(*p, *entry);
+    });
     menu.add("Search entries", [p] { searchEntries(*p); });
     menu.add("Generate a password", generatePassword);
     menu.add("Check password strength (coming soon)",
              [] { notImplemented("Checking password strength"); });
     menu.setList([p] {
         Menu::List list;
-        list.heading = "Saved entries";
-        if (!p->loaded()) {
-            list.emptyMessage = "Saved entries are unavailable.";
-            return list;
-        }
-        list.emptyMessage = "No entries yet. Choose \"Add entry\" to add one.";
+        list.heading = "Saved Passwords";
+        list.emptyMessage = p->loaded() ? "No passwords yet. Choose Add Password to get started."
+                                       : "Saved passwords are unavailable.";
+        if (!p->loaded()) return list;
         for (const auto& entry : p->list())
-            list.rows.push_back({entry.site, entry.username});
+            list.rows.push_back({entry.site, entry.username,
+                                 [p, entry] { viewEntry(*p, entry); }, entry.starred});
         return list;
     });
     return menu;
 }
-
-}  // namespace ui
+} // namespace ui

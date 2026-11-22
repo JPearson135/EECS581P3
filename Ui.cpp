@@ -4,6 +4,7 @@
 #include "IdleTimer.hpp"
 #include "Wallet.hpp"
 #include "Totp.hpp"
+#include "Passwords.hpp"
 #include <ctime>
 #include <openssl/crypto.h>
 #include <FL/Fl.H>
@@ -770,6 +771,7 @@ struct CardStarControl {
     const std::function<bool(bool)>& save;
     const std::function<void()>& edit;
     const std::function<void()>& reveal;
+    const char* revealLabel;
 };
 
 bool prompt(Kind kind, const std::string& message, std::string* value,
@@ -887,7 +889,7 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
         // edit and reveal are explicit actions while ok closes the details dialog
         auto* edit = new LinkButton(pad + 48, y, 52, 30, "Edit", false);
         edit->callback(trampoline, bindings.add([star, win] { win->hide(); star->edit(); }));
-        auto* reveal = new LinkButton(pad + 115, y, 112, 30, "Show number", false);
+        auto* reveal = new LinkButton(pad + 115, y, 112, 30, star->revealLabel, false);
         reveal->callback(trampoline, bindings.add(star->reveal));
         auto* error = new Fl_Box(pad, y + 30, 240, 24);
         error->labelsize(13);
@@ -1300,17 +1302,19 @@ void addAuthenticatorAccountForm(const AuthSubmit& submit) {
     clearFields();
 }
 
-void addPasswordEntryForm(const PasswordSubmit& onSubmit) {
+void addPasswordEntryForm(const PasswordSubmit& onSubmit, const std::string& initialSite,
+                          const std::string& initialUsername, std::string_view initialPassword,
+                          const std::string& initialNotes, const std::function<bool()>& remove) {
     Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
     Fl_PNG_Image visibleSource("visible", visibleIcon, sizeof(visibleIcon));
     std::unique_ptr<Fl_Image> hidden = makeIcon(hiddenSource, 96);
     std::unique_ptr<Fl_Image> visible = makeIcon(visibleSource, 104);
     BindingList bindings;
     DialogWindow dialog(540, 610);
-    dialog.copy_label("Add password entry");
+    dialog.copy_label(remove ? "Edit password" : "Add password");
     dialog.color(bgColor());
     dialog.set_modal();
-    new Text(40, 28, 460, 36, "Add password entry", 26, textColor());
+    new Text(40, 28, 460, 36, remove ? "Edit password" : "Add password", 26, textColor());
     new Text(40, 70, 460, 38, "Entries are encrypted in your vault.",
              14, mutedColor());
 
@@ -1319,9 +1323,11 @@ void addPasswordEntryForm(const PasswordSubmit& onSubmit) {
     new Text(40, 200, 460, 24, "Username or email", 15, mutedColor());
     auto* username = new Field<Fl_Input>(40, 228, 460, 34);
     new Text(40, 288, 400, 24, "Password", 15, mutedColor());
-    auto* password = new Field<Fl_Secret_Input>(40, 316, 408, 34);
+    auto* password = new Field<Fl_Secret_Input>(40, 316, 460, 34);
 
     auto* eye = new EyeButton(456, 311, 44, 44);
+    // repaint the embedded eye after the field and continue its focus underline
+    password->embeddedEye = eye;
     eye->insideField = true;
     eye->inputOwner = password;
     eye->color(bgColor());
@@ -1338,6 +1344,18 @@ void addPasswordEntryForm(const PasswordSubmit& onSubmit) {
 
     new Text(40, 376, 460, 24, "Notes (optional)", 15, mutedColor());
     auto* notes = new Field<Fl_Input>(40, 404, 460, 34);
+    site->value(initialSite.c_str());
+    username->value(initialUsername.c_str());
+    if (!initialPassword.empty()) password->value(initialPassword.data(), static_cast<int>(initialPassword.size()));
+    notes->value(initialNotes.c_str());
+    auto* generate = new LinkButton(330, 278, 170, 30, "Generate password", false);
+    generate->callback(trampoline, bindings.add([&] {
+        passwords::GenerateOptions options;
+        if (auto generated = passwords::generatePassword(options)) {
+            password->value(generated->view().data(), static_cast<int>(generated->size()));
+            password->redraw();
+        }
+    }));
     const int errorY[] = {178, 266, 354, 442};
     Fl_Box* errors[4];
     for (int i = 0; i < 4; ++i) {
@@ -1382,8 +1400,14 @@ void addPasswordEntryForm(const PasswordSubmit& onSubmit) {
     };
     auto* cancel = new LinkButton(240, 520, 80, 30, "Cancel", false);
     cancel->callback(trampoline, bindings.add(close));
-    auto* addButton = new LinkButton(350, 520, 150, 30, "Add entry", true);
+    auto* addButton = new LinkButton(350, 520, 150, 30, remove ? "Save changes" : "Add password", true);
     addButton->callback(trampoline, bindings.add(submitForm));
+    if (remove) {
+        auto* erase = new LinkButton(40, 520, 90, 30, "Delete", false);
+        erase->callback(trampoline, bindings.add([&] {
+            if (confirm("Delete this password entry? This cannot be undone.") && remove()) close();
+        }));
+    }
     dialog.onEnter = submitForm;
     dialog.end();
     centre(dialog);
@@ -1598,8 +1622,9 @@ void showMessage(const std::string& text, const std::string& iconPath) {
 
 void showCardDetails(const std::string& text, const std::string& iconPath,
                      bool starred, const std::function<bool(bool)>& saveStar,
-                     const std::function<void()>& edit, const std::function<void()>& reveal) {
-    CardStarControl star{starred, saveStar, edit, reveal};
+                     const std::function<void()>& edit, const std::function<void()>& reveal,
+                     const char* revealLabel) {
+    CardStarControl star{starred, saveStar, edit, reveal, revealLabel};
     prompt(Kind::Message, text, nullptr, "", false, false, false, false, iconPath, &star);
 }
 
@@ -1667,6 +1692,11 @@ void Menu::setHomeCards(std::function<HomeCards()> load, Action add, Action view
     viewHomeCards_ = std::move(view);
 }
 
+void Menu::setHomePasswords(std::function<HomeCards()> load, Action add) {
+    loadHomePasswords_ = std::move(load);
+    addHomePassword_ = std::move(add);
+}
+
 void Menu::setWelcome(const std::string& text) { welcome_ = text; }
 void Menu::setList(std::function<List()> load) { loadList_ = std::move(load); }
 
@@ -1688,7 +1718,20 @@ void Menu::run() const {
     std::vector<std::function<void()>> pageRefresh;
     std::vector<NavButton*> navButtons;
 
-    Fl_Double_Window window(kWinW, kWinH);
+    // background clicks do not always move focus, so dismiss search before dispatching them
+    class HomeWindow : public Fl_Double_Window {
+    public:
+        using Fl_Double_Window::Fl_Double_Window;
+        Fl_Widget* searchField = nullptr;
+        std::function<void()> dismissSearch;
+        int handle(int event) override {
+            if (event == FL_PUSH && searchField && searchField->visible() &&
+                !Fl::event_inside(searchField) && dismissSearch)
+                dismissSearch();
+            return Fl_Double_Window::handle(event);
+        }
+    };
+    HomeWindow window(kWinW, kWinH);
     window.copy_label(title_.c_str());
     window.xclass("DigiWallet");
     window.color(bgColor());
@@ -1715,6 +1758,51 @@ void Menu::run() const {
     // Keep the dashboard current when home is opened or a card action finishes.
     // keep logos and callback bindings alive for the current set of rows
     std::vector<std::unique_ptr<Fl_Image>> homeLogos;
+    // keep search controls alive while rebuilding the filtered rows
+    auto searchGrey = loadCardLogo("Assets/search_grey.png", 24, 24);
+    auto searchGold = loadCardLogo("Assets/search_gold.png", 24, 24);
+    auto addGrey = loadCardLogo("Assets/add_grey.png", 24, 24);
+    auto addGold = loadCardLogo("Assets/add_gld.png", 24, 24);
+    class SearchButton : public EyeButton {
+    public:
+        using EyeButton::EyeButton;
+        Fl_Image* grey = nullptr;
+        Fl_Image* gold = nullptr;
+        int handle(int event) override {
+            if (event == FL_ENTER) { image(gold); redraw(); }
+            if (event == FL_LEAVE) { image(grey); redraw(); }
+            return EyeButton::handle(event);
+        }
+    };
+    // fixed search controls belong to the page, outside the scrolling rows
+    homePage->begin();
+    auto* searchButton = new SearchButton(kWinW - kMargin - 139, 174, 44, 44);
+    searchButton->color(bgColor());
+    searchButton->grey = searchGrey.get();
+    searchButton->gold = searchGold.get();
+    searchButton->image(searchGrey.get());
+    auto* searchInput = new Field<Fl_Input>(kWinW - kMargin - 310, 181, 310, 34);
+    Fl_PNG_Image clearSource("search-clear", crossIcon, sizeof(crossIcon));
+    auto clearImage = makeIcon(clearSource, 64);
+    auto* clearSearch = new EyeButton(searchInput->x() + searchInput->w() - 44,
+                                      searchInput->y() - 5, 44, 44);
+    clearSearch->color(bgColor());
+    clearSearch->insideField = true;
+    clearSearch->inputOwner = searchInput;
+    clearSearch->image(clearImage.get());
+    clearSearch->tooltip("Clear search");
+    searchInput->embeddedEye = clearSearch;
+    clearSearch->hide();
+    searchInput->hide();
+    Binding openSearchBinding;
+    openSearchBinding.fn = [=] {
+        searchButton->hide();
+        searchInput->show();
+        clearSearch->show();
+        searchInput->take_focus();
+        homePage->redraw();
+    };
+    searchButton->callback(trampoline, &openSearchBinding);
     BindingList homeBindings;
     std::vector<FavoriteRow*> favoriteRows;
     // map the pointer to a destination row using its current scrolled position
@@ -1735,7 +1823,8 @@ void Menu::run() const {
         // rebuild the dashboard rows while keeping the scroll controls
         for (int i = home->children() - 1; i >= 0; --i) {
             auto* child = home->child(i);
-            if (child != &home->scrollbar && child != &home->hscrollbar) delete child;
+            if (child != &home->scrollbar && child != &home->hscrollbar &&
+                child != searchButton && child != searchInput) delete child;
         }
         // release the old callbacks and logos after deleting the rows that reference them
         favoriteRows.clear();
@@ -1743,31 +1832,69 @@ void Menu::run() const {
         homeLogos.clear();
         home->begin();
         // ask the controller for current favorites after any add, remove, or star changes
-        const HomeCards cards = loadHomeCards_();
-        new Text(kMargin, 125, 400, 52, "Favorite Cards", 36, textColor());
-        // show shortcuts only when the wallet loaded and highlight add card for an empty wallet
-        if (cards.available) {
-            auto* add = new LinkButton(kWinW - kMargin - 254, 132, 105, 30, "Add Card", !cards.hasCards);
-            add->callback(runHomeAction, homeBindings.add([&] { addHomeCard_(); refreshHome(); }));
-            if (cards.hasCards) {
-                auto* view = new LinkButton(kWinW - kMargin - 129, 132, 129, 30, "View All Cards", true);
-                view->callback(runHomeAction, homeBindings.add([&] { viewHomeCards_(); refreshHome(); }));
-            }
+        HomeCards cards = loadHomeCards_();
+        HomeCards passwords = loadHomePasswords_ ? loadHomePasswords_() : HomeCards{};
+        const std::string query = searchInput->value();
+        auto matches = [&](const HomeCard& entry) {
+            return std::search(entry.searchText.begin(), entry.searchText.end(), query.begin(), query.end(),
+                [](unsigned char a, unsigned char b) {
+                    auto lower = [](unsigned char c) { return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c; };
+                    return lower(a) == lower(b);
+                }) != entry.searchText.end() || query.empty();
+        };
+        auto filter = [&](HomeCards& entries) {
+            entries.favorites.erase(std::remove_if(entries.favorites.begin(), entries.favorites.end(),
+                [&](const HomeCard& entry) { return !matches(entry); }), entries.favorites.end());
+        };
+        filter(cards);
+        filter(passwords);
+        new Text(kMargin, 125, 400, 52, "Favorites", 36, textColor());
+        // align the plus artwork with the favorites heading
+        if (cards.available || passwords.available) {
+            auto* add = new SearchButton(kMargin - 10, 174, 44, 44);
+            add->color(bgColor());
+            add->grey = addGrey.get();
+            add->gold = addGold.get();
+            add->image(addGrey.get());
+            add->tooltip("Add card or password");
+            add->callback(runHomeAction, homeBindings.add([&, canAddCard = cards.available,
+                                                            canAddPassword = passwords.available] {
+                int selected = 0;
+                Menu choice("Add", "Cancel");
+                auto choose = [&](int value) {
+                    selected = value;
+                    if (auto* top = Fl::first_window()) top->hide();
+                };
+                if (canAddCard) choice.add("Add Card", [&] { choose(1); });
+                if (canAddPassword) choice.add("Add Password", [&] { choose(2); });
+                Menu host("Favorites");
+                host.addSubmenu("Add", std::move(choice));
+                host.invoke(0);
+                if (selected == 1) addHomeCard_();
+                if (selected == 2) addHomePassword_();
+                refreshHome();
+            }));
         }
-        int y = 200;
+        searchButton->position(kWinW - kMargin - 34, 174);
+        searchInput->position(kWinW - kMargin - searchInput->w(), 181);
+        clearSearch->position(searchInput->x() + searchInput->w() - clearSearch->w(),
+                              searchInput->y() - 5);
+        int y = 238;
         // use the wallet state to explain why there are no rows
-        if (cards.favorites.empty()) {
-            const char* message = !cards.available ? "Saved cards are unavailable."
-                : cards.hasCards ? "No favorite cards yet. Star a card from its details to see it here."
-                                 : "Add your first card to get started.";
+        if (cards.favorites.empty() && passwords.favorites.empty()) {
+            const char* message = !query.empty() ? "No favorites match your search."
+                : !cards.available && !passwords.available ? "Saved favorites are unavailable."
+                : cards.hasCards || passwords.hasCards ? "Star a card or password from its details to see it here."
+                                                       : "Add your first card or password to get started.";
             new Text(kMargin, y, contentW, 52, message, 16, mutedColor());
         }
         // reuse the scrollable row style and refresh after its details dialog returns
         for (const auto& card : cards.favorites) {
-            auto* row = new FavoriteRow(kMargin, y, contentW, 60, card.label, y == 200);
+            auto* row = new FavoriteRow(kMargin, y, contentW, 60, card.label, y == 238);
             const std::size_t from = favoriteRows.size();
             favoriteRows.push_back(row);
             row->preview = [&, from](int pointerY) {
+                if (searchInput->value()[0]) return;
                 // place the drop line above an earlier row or below a later row
                 const auto to = favoriteAt(pointerY);
                 for (std::size_t i = 0; i < favoriteRows.size(); ++i) {
@@ -1778,7 +1905,7 @@ void Menu::run() const {
             // save the new order only when the destination differs and rebuild the rows
             row->drop = [&, from](int pointerY) {
                 const auto to = favoriteAt(pointerY);
-                if (from != to && moveHomeCard_) moveHomeCard_(from, to);
+                if (!searchInput->value()[0] && from != to && moveHomeCard_) moveHomeCard_(from, to);
                 refreshHome();
             };
             if (!card.iconPath.empty()) {
@@ -1788,9 +1915,45 @@ void Menu::run() const {
             row->callback(runHomeAction, homeBindings.add([&, open = card.open] { open(); refreshHome(); }));
             y += 60;
         }
+        // password favorites reuse their details flow without exposing stored secrets
+        if (!passwords.favorites.empty()) {
+            if (!cards.favorites.empty()) y += 24;
+            new Text(kMargin, y, contentW, 24, "Passwords", 15, mutedColor());
+            y += 32;
+            for (const auto& entry : passwords.favorites) {
+                auto* row = new Row(kMargin, y, contentW, 60, entry.label, false);
+                homeLogos.push_back(loadCardLogo("Assets/star_full.png", 18, 18));
+                row->image(homeLogos.back().get());
+                row->callback(runHomeAction, homeBindings.add([&, open = entry.open] {
+                    open();
+                    refreshHome();
+                }));
+                y += 60;
+            }
+        }
         home->end();
         home->redraw();
     };
+    searchInput->validateOnEdit = [&] { refreshHome(); };
+    window.searchField = searchInput;
+    // keep an active query visible until it is cleared
+    window.dismissSearch = [&] {
+        if (searchInput->value()[0]) return;
+        clearSearch->hide();
+        searchInput->hide();
+        searchButton->show();
+        homePage->redraw();
+    };
+    Binding clearSearchBinding;
+    clearSearchBinding.fn = [&] {
+        searchInput->value("");
+        refreshHome();
+        searchInput->take_focus();
+        homePage->redraw();
+    };
+    clearSearch->callback(trampoline, &clearSearchBinding);
+    searchInput->validateOnBlur = window.dismissSearch;
+    searchInput->when(FL_WHEN_NEVER);
     home->begin();
     // keep the plain welcome page for menus without a dashboard provider
     if (!loadHomeCards_) {
@@ -1849,7 +2012,9 @@ void Menu::run() const {
         std::function<void()> refresh;
         if (sub->loadList_) {
             auto listWidgets = std::make_shared<std::vector<Fl_Widget*>>();
-            refresh = [page, sub, listWidgets, listTop, contentW, &window] {
+            auto refreshAction = std::make_shared<std::function<void()>>();
+            std::weak_ptr<std::function<void()>> weakRefresh = refreshAction;
+            refresh = [page, sub, listWidgets, weakRefresh, listTop, contentW, &window] {
                 if (!window.shown()) return;  // an action may have locked or closed the window
                 for (Fl_Widget* widget : *listWidgets) delete widget;
                 listWidgets->clear();
@@ -1863,14 +2028,41 @@ void Menu::run() const {
                     at += 52;
                 }
                 for (std::size_t k = 0; k < list.rows.size(); ++k) {
-                    listWidgets->push_back(new InfoRow(kMargin, at, contentW, 60, list.rows[k].title,
-                                                       list.rows[k].detail, k == 0));
+                    if (list.rows[k].open) {
+                        class EntryRow : public InfoRow {
+                        public:
+                            using InfoRow::InfoRow;
+                            std::function<void()> open;
+                            int handle(int event) override {
+                                if (event == FL_PUSH) return 1;
+                                if (event == FL_RELEASE && Fl::event_inside(this)) {
+                                    auto action = open;
+                                    action();
+                                    return 1;
+                                }
+                                return InfoRow::handle(event);
+                            }
+                        };
+                        auto* row = new EntryRow(kMargin, at, contentW, 60,
+                            (list.rows[k].starred ? "★  " : "") + list.rows[k].title,
+                            list.rows[k].detail, k == 0);
+                        row->open = [action = list.rows[k].open, refreshAction = weakRefresh.lock(), &window] {
+                            action();
+                            if (window.shown()) (*refreshAction)();
+                        };
+                        listWidgets->push_back(row);
+                    } else {
+                        listWidgets->push_back(new InfoRow(kMargin, at, contentW, 60, list.rows[k].title,
+                                                           list.rows[k].detail, k == 0));
+                    }
                     at += 60;
                 }
                 listWidgets->push_back(new Fl_Box(kMargin, at, 1, 24));
                 page->end();
                 page->redraw();
             };
+            *refreshAction = refresh;
+            refresh = [refreshAction] { (*refreshAction)(); };
         }
         for (std::size_t j = 0; j < sub->itemCount(); ++j) {
             Row* row = new Row(kMargin, y, contentW, 60, sub->itemLabel(j), j == 0);

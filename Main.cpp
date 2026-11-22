@@ -162,6 +162,7 @@ int main() {
             ui::Menu root("DigiWallet", "Exit");
             // wire home to the unlocked wallet and its existing card actions
             ui::configureWalletHome(root, cards);
+            ui::configurePasswordHome(root, passwordEntries);
             root.addSubmenu("Passwords", ui::passwordMenu(passwordEntries));
             root.addSubmenu("Authenticator", ui::authMenu(auth));
             root.addSubmenu("Wallet", ui::walletMenu(cards));

@@ -169,6 +169,21 @@ static void testManager(const fs::path& root) {
     check(r.passwords.add("bank.com", "person", " spaces allowed ", "") == AddResult::Added,
           "password edge spaces and empty notes are accepted");
     check(r.passwords.size() == 2, "two entries are retained");
+    // favorites and edits survive reload without losing the stored password
+    check(r.passwords.setStarred("bank.com", "person", true), "favorite saved entry");
+    check(r.passwords.load() == LoadResult::Ok && r.passwords.list()[0].starred &&
+          r.passwords.list()[0].site == "bank.com", "favorite persists and sorts first");
+    check(r.passwords.update("bank.com", "person", "bank.com", "person", "changed!", "edited") ==
+          AddResult::Added, "edit saved entry");
+    check(r.passwords.load() == LoadResult::Ok && r.passwords.list()[0].starred &&
+          r.passwords.revealPassword("bank.com", "person")->view() == "changed!", "edit preserves favorite");
+    check(r.passwords.update("bank.com", "person", "example.com", "person", "changed!", "") ==
+          AddResult::Duplicate, "edit rejects duplicate entry");
+    check(r.passwords.update("bank.com", "person", "bank.com", "person", " spaces allowed ", "") ==
+          AddResult::Added, "restore test password");
+    check(r.passwords.setStarred("bank.com", "person", false), "unfavorite saved entry");
+    check(r.passwords.load() == LoadResult::Ok && !r.passwords.list()[1].starred, "unfavorite persists");
+
 
     check(r.passwords.add("EXAMPLE.COM", "PERSON", "another", "") == AddResult::Duplicate,
           "duplicate site and username is case-insensitive");
@@ -269,7 +284,7 @@ static void testTamper(const fs::path& root) {
     const std::string entry =
         field("example.com") + field("person") + field("secret") + field("note");
     const std::pair<const char*, std::string> malformed[] = {
-        {"wrong magic", "DWPASS02" + u32(0)},
+        {"wrong magic", "DWPASS03" + u32(0)},
         {"count too large", "DWPASS01" + u32(1001)},
         {"count larger than data", "DWPASS01" + u32(2) + entry},
         {"truncated field", "DWPASS01" + u32(1) + u32(11) + "example.com"},

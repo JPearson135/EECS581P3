@@ -444,11 +444,18 @@ bool Authenticator::removeAccount(const std::string& name) {
     return false;
 }
 
-std::string Authenticator::currentCode(const AuthAccount& account) {
-    char buf[8];
-    std::snprintf(buf, sizeof(buf), "%06d", generateOtp(account.secret, std::time(nullptr)));
-    return buf;
+// find the account internally so callers never need its secret to request a code
+std::optional<std::string> Authenticator::currentCode(std::string_view name, std::time_t now) const {
+    if (!loaded_) throw std::runtime_error("Authenticator is not loaded");
+    for (const auto& entry : accounts) {
+        if (!sameName(entry.first, name)) continue;
+        char buffer[8];
+        std::snprintf(buffer, sizeof(buffer), "%06d", generateOtp(entry.second.secret, now));
+        return std::string(buffer);
+    }
+    return std::nullopt;
 }
-int Authenticator::secondsRemaining() {
-    return 30 - static_cast<int>(std::time(nullptr) % 30);
+
+int Authenticator::secondsRemaining(std::time_t now) {
+    return 30 - static_cast<int>(now % 30);
 }
