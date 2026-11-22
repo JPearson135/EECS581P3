@@ -74,6 +74,7 @@ app: build
 	mkdir -p $(APP_NAME).app/Contents/MacOS
 	mkdir -p $(APP_NAME).app/Contents/Resources/Assets
 	cp Assets/visa.png Assets/mastercard.png Assets/americanexpress.png Assets/discover.png Assets/star_empty.png Assets/star_full.png Assets/search_gold.png Assets/search_grey.png Assets/add_gld.png Assets/add_grey.png $(APP_NAME).app/Contents/Resources/Assets/
+	cp Assets/DigiWallet.icns $(APP_NAME).app/Contents/Resources/DigiWallet.icns
 	# replace the executable instead of overwriting the running copy
 	cp $(TARGET) $(APP_NAME).app/Contents/MacOS/$(APP_NAME).new
 	mv -f $(APP_NAME).app/Contents/MacOS/$(APP_NAME).new $(APP_NAME).app/Contents/MacOS/$(APP_NAME)
@@ -83,6 +84,7 @@ app: build
 	  '<plist version="1.0"><dict>' \
 	  '<key>CFBundleName</key><string>$(APP_NAME)</string>' \
 	  '<key>CFBundleExecutable</key><string>$(APP_NAME)</string>' \
+	  '<key>CFBundleIconFile</key><string>DigiWallet.icns</string>' \
 	  '<key>CFBundleIdentifier</key><string>com.digiwallet.app</string>' \
 	  '<key>CFBundlePackageType</key><string>APPL</string>' \
 	  '<key>CFBundleVersion</key><string>1.0</string>' \

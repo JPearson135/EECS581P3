@@ -378,7 +378,13 @@ public:
         // the last argument is 0 so an '@' in an email is not read as a symbol code
         fl_font(FL_HELVETICA, scaledText(*this, 17));
         fl_color(textColor());
-        fl_draw(title_.c_str(), x(), y() + 8, w(), 24, FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
+        int titleIndent = 0;
+        if (auto* marker = image()) {
+            marker->draw(x(), y() + 8 + (24 - marker->h()) / 2);
+            titleIndent = marker->w() + 8;
+        }
+        fl_draw(title_.c_str(), x() + titleIndent, y() + 8, w() - titleIndent, 24,
+                FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
         fl_font(FL_HELVETICA, scaledText(*this, 13));
         fl_color(mutedColor());
         fl_draw(detail_.c_str(), x(), y() + 34, w(), 18, FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
@@ -1310,7 +1316,7 @@ void addPasswordEntryForm(const PasswordSubmit& onSubmit, const std::string& ini
     std::unique_ptr<Fl_Image> hidden = makeIcon(hiddenSource, 96);
     std::unique_ptr<Fl_Image> visible = makeIcon(visibleSource, 104);
     BindingList bindings;
-    DialogWindow dialog(540, 610);
+    DialogWindow dialog(540, 650);
     dialog.copy_label(remove ? "Edit password" : "Add password");
     dialog.color(bgColor());
     dialog.set_modal();
@@ -1342,13 +1348,16 @@ void addPasswordEntryForm(const PasswordSubmit& onSubmit, const std::string& ini
         eye->redraw();
     }));
 
-    new Text(40, 376, 460, 24, "Notes (optional)", 15, mutedColor());
-    auto* notes = new Field<Fl_Input>(40, 404, 460, 34);
+    new Text(40, 436, 460, 24, "Notes (optional)", 15, mutedColor());
+    auto* notes = new Field<Fl_Input>(40, 464, 460, 34);
     site->value(initialSite.c_str());
     username->value(initialUsername.c_str());
     if (!initialPassword.empty()) password->value(initialPassword.data(), static_cast<int>(initialPassword.size()));
     notes->value(initialNotes.c_str());
-    auto* generate = new LinkButton(330, 278, 170, 30, "Generate password", false);
+    // fit the link to its label so the text ends at the field edge
+    fl_font(FL_HELVETICA, 15);
+    const int generateWidth = static_cast<int>(fl_width("Generate password") + 0.999);
+    auto* generate = new LinkButton(500 - generateWidth, 360, generateWidth, 30, "Generate password", false);
     generate->callback(trampoline, bindings.add([&] {
         passwords::GenerateOptions options;
         if (auto generated = passwords::generatePassword(options)) {
@@ -1356,7 +1365,7 @@ void addPasswordEntryForm(const PasswordSubmit& onSubmit, const std::string& ini
             password->redraw();
         }
     }));
-    const int errorY[] = {178, 266, 354, 442};
+    const int errorY[] = {178, 266, 398, 502};
     Fl_Box* errors[4];
     for (int i = 0; i < 4; ++i) {
         errors[i] = new Fl_Box(40, errorY[i], 460, 30);
@@ -1398,12 +1407,12 @@ void addPasswordEntryForm(const PasswordSubmit& onSubmit, const std::string& ini
         errors[at]->show();
         dialog.redraw();
     };
-    auto* cancel = new LinkButton(240, 520, 80, 30, "Cancel", false);
+    auto* cancel = new LinkButton(240, 560, 80, 30, "Cancel", false);
     cancel->callback(trampoline, bindings.add(close));
-    auto* addButton = new LinkButton(350, 520, 150, 30, remove ? "Save changes" : "Add password", true);
+    auto* addButton = new LinkButton(350, 560, 150, 30, remove ? "Save changes" : "Add password", true);
     addButton->callback(trampoline, bindings.add(submitForm));
     if (remove) {
-        auto* erase = new LinkButton(40, 520, 90, 30, "Delete", false);
+        auto* erase = new LinkButton(40, 560, 90, 30, "Delete", false);
         erase->callback(trampoline, bindings.add([&] {
             if (confirm("Delete this password entry? This cannot be undone.") && remove()) close();
         }));
@@ -2032,6 +2041,7 @@ void Menu::run() const {
                         class EntryRow : public InfoRow {
                         public:
                             using InfoRow::InfoRow;
+                            std::unique_ptr<Fl_Image> favoriteIcon;
                             std::function<void()> open;
                             int handle(int event) override {
                                 if (event == FL_PUSH) return 1;
@@ -2044,8 +2054,13 @@ void Menu::run() const {
                             }
                         };
                         auto* row = new EntryRow(kMargin, at, contentW, 60,
-                            (list.rows[k].starred ? "★  " : "") + list.rows[k].title,
+                            list.rows[k].title,
                             list.rows[k].detail, k == 0);
+                        // own the png with the row so list refreshes release it safely
+                        if (list.rows[k].starred) {
+                            row->favoriteIcon = loadCardLogo("Assets/star_full.png", 18, 18);
+                            row->image(row->favoriteIcon.get());
+                        }
                         row->open = [action = list.rows[k].open, refreshAction = weakRefresh.lock(), &window] {
                             action();
                             if (window.shown()) (*refreshAction)();
