@@ -106,7 +106,26 @@ std::optional<std::string> pickAccount(const Authenticator& auth, const std::str
     host.invoke(0);
     return chosen;
 }
+void showCodeScreen(Authenticator& auth) {
+    if (!ready(auth)) return;
+    guarded([&] {
+        const auto name = pickAccount(auth, "Show code");
+        if (!name) return;
 
+        // Take the time once so the code and the countdown always agree.
+        const std::time_t now = std::time(nullptr);
+        const auto code = auth.currentCode(*name, now);
+        if (!code) {
+            showMessage("That account could not be found.");
+            return;
+        }
+
+        // Display as "123 456" for readability.
+        const std::string shown = code->substr(0, 3) + " " + code->substr(3);
+        showMessage("Code for \"" + *name + "\":\n\n" + shown + "\n\nExpires in " +
+                    std::to_string(Authenticator::secondsRemaining(now)) + " seconds.");
+    });
+}
 void removeAccountScreen(Authenticator& auth) {
     if (!ready(auth)) return;
     guarded([&] {
@@ -121,8 +140,7 @@ Menu authMenu(Authenticator& auth) {
     Menu menu("Authenticator");
     Authenticator* a = &auth;
     menu.add("Add account", [a] { addAccountScreen(*a); });
-    menu.add("Show codes (coming soon)",
-             [] { notImplemented("Showing authenticator codes"); });
+    menu.add("Show codes", [a] { showCodeScreen(*a); });
     menu.add("Delete account", [a] { removeAccountScreen(*a); });
     // Show account labels and contacts, but never the secret.
     menu.setList([a] {
