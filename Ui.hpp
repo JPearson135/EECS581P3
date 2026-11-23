@@ -74,13 +74,21 @@ public:
     void setHomeCards(std::function<HomeCards()> load, Action add, Action view,
                       std::function<void(std::size_t, std::size_t)> move);
     // one read-only line in a list shown under a section's own rows
-    struct ListRow { std::string title; std::string detail; Action open; bool starred = false; };
+    struct ListRow {
+        std::string title;
+        std::string detail;
+        Action open;
+        bool starred = false;
+        std::string searchText;
+        std::string iconPath;
+    };
     struct List {
         std::string heading;       // for example "Saved accounts"
         std::string emptyMessage;  // shown instead of rows when the list is empty
         std::vector<ListRow> rows;
     };
     // supply a fresh list every time the section is shown or one of its actions finishes
+    void enableListSearch() { searchableList_ = true; }
     void setList(std::function<List()> load);
     // password home rows contain safe account summaries and existing details actions
     void setHomePasswords(std::function<HomeCards()> load, Action add);
@@ -113,6 +121,7 @@ private:
     Action addHomePassword_;
     std::function<void(std::size_t, std::size_t)> moveHomeCard_;
     std::function<List()> loadList_;
+    bool searchableList_ = false;
     std::vector<Item> items_;
 };
 

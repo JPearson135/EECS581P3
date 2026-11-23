@@ -159,8 +159,22 @@ Menu walletMenu(wallet::CardWallet& cards) {
     Menu menu("Wallet");
     wallet::CardWallet* w = &cards;
     menu.add("Add card", [w] { addCard(*w); });
-    menu.add("View cards", [w] { viewCards(*w); });
     menu.add("Remove card", [w] { removeCard(*w); });
+    menu.setList([w] {
+        Menu::List list;
+        list.heading = "Saved Cards";
+        list.emptyMessage = w->loaded() ? "No cards yet. Choose Add card to get started."
+                                        : "Saved cards are unavailable.";
+        if (!w->loaded()) return list;
+        for (const auto& card : w->list()) {
+            const std::string detail = card.holder.empty()
+                ? card.masked : card.holder + "    " + card.masked;
+            list.rows.push_back({card.label, detail,
+                                 [w, label = card.label] { openCard(*w, label); }, card.starred,
+                                 {}, cardNetworkIcon(card.network)});
+        }
+        return list;
+    });
     return menu;
 }
 

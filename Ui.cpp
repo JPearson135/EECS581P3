@@ -369,8 +369,10 @@ class InfoRow : public Fl_Widget {
 public:
     InfoRow(int x, int y, int w, int h, const std::string& title, const std::string& detail, bool first)
         : Fl_Widget(x, y, w, h), title_(title), detail_(detail), first_(first) {}
+    bool highlighted = false;
+    bool centerImage = false;
     void draw() override {
-        fl_color(bgColor());
+        fl_color(highlighted ? surfaceColor() : bgColor());
         fl_rectf(x(), y(), w(), h());
         fl_color(lineColor());
         fl_rectf(x(), y() + h() - 1, w(), 1);
@@ -380,14 +382,18 @@ public:
         fl_color(textColor());
         int titleIndent = 0;
         if (auto* marker = image()) {
-            marker->draw(x(), y() + 8 + (24 - marker->h()) / 2);
+            const int imageY = centerImage ? y() + (h() - marker->h()) / 2
+                                           : y() + 8 + (24 - marker->h()) / 2;
+            marker->draw(x(), imageY);
             titleIndent = marker->w() + 8;
         }
         fl_draw(title_.c_str(), x() + titleIndent, y() + 8, w() - titleIndent, 24,
                 FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
         fl_font(FL_HELVETICA, scaledText(*this, 13));
         fl_color(mutedColor());
-        fl_draw(detail_.c_str(), x(), y() + 34, w(), 18, FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
+        const int detailIndent = centerImage ? titleIndent : 0;
+        fl_draw(detail_.c_str(), x() + detailIndent, y() + 34, w() - detailIndent, 18,
+                FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
     }
 private:
     std::string title_, detail_;
@@ -502,6 +508,10 @@ public:
         this->when(FL_WHEN_ENTER_KEY_ALWAYS);
     }
     void draw() override {
+        // derive embedded control geometry from the input after every resize
+        if (embeddedEye)
+            embeddedEye->resize(this->x() + this->w() - 44, this->y() - 5,
+                                44, this->h() + 10);
         if (embeddedEye) fl_push_clip(this->x(), this->y(), this->w() - 52, this->h());
         Base::draw();
         if (embeddedEye) {
@@ -1726,6 +1736,7 @@ void Menu::run() const {
     // one refresh function per page (empty for pages without a list), same order as `pages`
     std::vector<std::function<void()>> pageRefresh;
     std::vector<NavButton*> navButtons;
+    std::vector<std::pair<Fl_Widget*, std::vector<Fl_Widget*>>> sectionSearches;
 
     // background clicks do not always move focus, so dismiss search before dispatching them
     class HomeWindow : public Fl_Double_Window {
@@ -1733,7 +1744,15 @@ void Menu::run() const {
         using Fl_Double_Window::Fl_Double_Window;
         Fl_Widget* searchField = nullptr;
         std::function<void()> dismissSearch;
+        std::vector<std::function<void()>> dismissSectionSearches;
+        std::vector<std::function<void()>> positionSectionSearches;
+        void resize(int x, int y, int w, int h) override {
+            Fl_Double_Window::resize(x, y, w, h);
+            for (auto& position : positionSectionSearches) position();
+        }
         int handle(int event) override {
+            if (event == FL_PUSH)
+                for (auto& dismiss : dismissSectionSearches) dismiss();
             if (event == FL_PUSH && searchField && searchField->visible() &&
                 !Fl::event_inside(searchField) && dismissSearch)
                 dismissSearch();
@@ -1755,7 +1774,18 @@ void Menu::run() const {
     homePage->box(FL_FLAT_BOX);
     homePage->color(bgColor());
     homePage->begin();
-    Fl_Scroll* home = new Fl_Scroll(0, kHeaderH + 1, kWinW, footerTop - kHeaderH - 1);
+    // scroll redraws must include fixed siblings such as the search controls
+    class HomeScroll : public Fl_Scroll {
+    public:
+        using Fl_Scroll::Fl_Scroll;
+        int handle(int event) override {
+            const int used = Fl_Scroll::handle(event);
+            if ((event == FL_MOUSEWHEEL || event == FL_DRAG || event == FL_RELEASE) && parent())
+                parent()->redraw();
+            return used;
+        }
+    };
+    Fl_Scroll* home = new HomeScroll(0, kHeaderH + 1, kWinW, footerTop - kHeaderH - 1);
     home->box(FL_FLAT_BOX);
     home->color(bgColor());
     home->type(Fl_Scroll::VERTICAL);
@@ -1778,13 +1808,13 @@ void Menu::run() const {
         Fl_Image* grey = nullptr;
         Fl_Image* gold = nullptr;
         int handle(int event) override {
-            if (event == FL_ENTER) { image(gold); redraw(); }
-            if (event == FL_LEAVE) { image(grey); redraw(); }
+            if (event == FL_ENTER) { image(gold); if (window()) window()->redraw(); }
+            if (event == FL_LEAVE) { image(grey); if (window()) window()->redraw(); }
             return EyeButton::handle(event);
         }
     };
-    // fixed search controls belong to the page, outside the scrolling rows
-    homePage->begin();
+    // search shares the scroll area with the heading, add control, and favorites
+    home->begin();
     auto* searchButton = new SearchButton(kWinW - kMargin - 139, 174, 44, 44);
     searchButton->color(bgColor());
     searchButton->grey = searchGrey.get();
@@ -1801,8 +1831,9 @@ void Menu::run() const {
     clearSearch->image(clearImage.get());
     clearSearch->tooltip("Clear search");
     searchInput->embeddedEye = clearSearch;
-    clearSearch->hide();
-    searchInput->hide();
+    searchButton->hide();
+    clearSearch->show();
+    searchInput->show();
     Binding openSearchBinding;
     openSearchBinding.fn = [=] {
         searchButton->hide();
@@ -1828,18 +1859,23 @@ void Menu::run() const {
     std::function<void()> refreshHome = [&] {
         // skip rebuilding after a nested dialog triggers vault lock or exit
         if (!loadHomeCards_ || !window.shown()) return;
+        // preserve the viewport and resized input geometry while replacing results
+        const int scrollX = 0;
+        const int scrollY = home->yposition();
         home->scroll_to(0, 0);
         // rebuild the dashboard rows while keeping the scroll controls
         for (int i = home->children() - 1; i >= 0; --i) {
             auto* child = home->child(i);
             if (child != &home->scrollbar && child != &home->hscrollbar &&
-                child != searchButton && child != searchInput) delete child;
+                child != searchButton && child != searchInput && child != clearSearch) delete child;
         }
         // release the old callbacks and logos after deleting the rows that reference them
         favoriteRows.clear();
         homeBindings = BindingList{};
         homeLogos.clear();
         home->begin();
+        // anchor the viewport even when filtering leaves only a small result set
+        new Fl_Box(home->x(), home->y(), home->w(), home->h());
         // ask the controller for current favorites after any add, remove, or star changes
         HomeCards cards = loadHomeCards_();
         HomeCards passwords = loadHomePasswords_ ? loadHomePasswords_() : HomeCards{};
@@ -1940,19 +1976,18 @@ void Menu::run() const {
                 y += 60;
             }
         }
+        // retain enough scroll extent to keep the field stationary as results shrink
+        if (Fl::focus() == searchInput)
+            new Fl_Box(kMargin, std::max(y, home->y() + home->h() + scrollY - 1), 1, 1);
         home->end();
-        home->redraw();
+        home->init_sizes();
+        home->scroll_to(scrollX, scrollY);
+        homePage->redraw();
     };
     searchInput->validateOnEdit = [&] { refreshHome(); };
     window.searchField = searchInput;
-    // keep an active query visible until it is cleared
-    window.dismissSearch = [&] {
-        if (searchInput->value()[0]) return;
-        clearSearch->hide();
-        searchInput->hide();
-        searchButton->show();
-        homePage->redraw();
-    };
+    // search stays available even when empty or unfocused
+    window.dismissSearch = [] {};
     Binding clearSearchBinding;
     clearSearchBinding.fn = [&] {
         searchInput->value("");
@@ -2016,6 +2051,8 @@ void Menu::run() const {
         new Text(kMargin, 146, contentW, 56, sub->title(), 40, textColor());
         int y = 236;
         const int listTop = y + 60 * static_cast<int>(sub->itemCount());
+        // keep an anchor that follows window resizing along with the section controls
+        auto* listOrigin = new Fl_Box(kMargin, listTop, contentW, 1);
         // a section can show a read-only list under its rows (for example the saved accounts);
         // rebuild it from a fresh snapshot whenever the section is shown or one of its actions ends
         std::function<void()> refresh;
@@ -2023,17 +2060,90 @@ void Menu::run() const {
             auto listWidgets = std::make_shared<std::vector<Fl_Widget*>>();
             auto refreshAction = std::make_shared<std::function<void()>>();
             std::weak_ptr<std::function<void()>> weakRefresh = refreshAction;
-            refresh = [page, sub, listWidgets, weakRefresh, listTop, contentW, &window] {
+            Field<Fl_Input>* listSearch = nullptr;
+            SearchButton* listSearchIcon = nullptr;
+            EyeButton* listClear = nullptr;
+            if (sub->searchableList_) {
+                // keep search with the section content so it scrolls in context
+                listSearchIcon = new SearchButton(kWinW - kMargin - 34, 100, 44, 44);
+                listSearchIcon->color(bgColor());
+                listSearchIcon->grey = searchGrey.get();
+                listSearchIcon->gold = searchGold.get();
+                listSearchIcon->image(searchGrey.get());
+                listSearch = new Field<Fl_Input>(kWinW - kMargin - 310, 105, 310, 34);
+                listClear = new EyeButton(kWinW - kMargin - 44, 100, 44, 44);
+                listClear->color(bgColor());
+                listClear->insideField = true;
+                listClear->inputOwner = listSearch;
+                listClear->image(clearImage.get());
+                listSearch->embeddedEye = listClear;
+                listSearch->when(FL_WHEN_NEVER);
+                listSearch->hide();
+                listClear->hide();
+                listSearchIcon->hide();
+                listSearchIcon->callback(trampoline, bindings.add([=, &window] {
+                    listSearchIcon->hide();
+                    listSearch->show();
+                    listClear->show();
+                    listSearch->take_focus();
+                    window.redraw();
+                }));
+                auto dismiss = [] {};
+                listSearch->validateOnBlur = dismiss;
+                window.dismissSectionSearches.push_back([=] {
+                    if (!Fl::event_inside(listSearch) && !Fl::event_inside(listSearchIcon)) dismiss();
+                });
+                listSearch->validateOnEdit = [weakRefresh] {
+                    if (auto refresh = weakRefresh.lock()) (*refresh)();
+                };
+                listClear->callback(trampoline, bindings.add([=] {
+                    listSearch->value("");
+                    if (auto refresh = weakRefresh.lock()) (*refresh)();
+                    listSearch->take_focus();
+                }));
+                sectionSearches.push_back({page, {listSearchIcon, listSearch, listClear}});
+                window.positionSectionSearches.push_back([=] {
+                    for (int child = 0; child < page->children(); ++child) {
+                        auto* row = dynamic_cast<Row*>(page->child(child));
+                        if (!row) continue;
+                        const int right = row->x() + row->w();
+                        // align search with favorites and leave a small gap above the first divider
+                        const int top = row->y() - 60;
+                        listSearchIcon->position(right - 34, top);
+                        listSearch->position(right - listSearch->w(), top + 5);
+                        listClear->position(right - 44, top);
+                        break;
+                    }
+                });
+            }
+            refresh = [page, sub, listWidgets, weakRefresh, listOrigin, listSearch, &window] {
                 if (!window.shown()) return;  // an action may have locked or closed the window
+                // rebuild at the unscrolled origin to avoid adding the scroll offset twice
+                const int scrollX = page->xposition();
+                const int scrollY = page->yposition();
+                page->scroll_to(0, 0);
                 for (Fl_Widget* widget : *listWidgets) delete widget;
                 listWidgets->clear();
                 page->begin();
-                const List list = sub->loadList_();
-                int at = listTop + 28;
-                listWidgets->push_back(new Text(kMargin, at, contentW, 20, upper(list.heading), 12, dimColor(), 4));
+                List list = sub->loadList_();
+                if (listSearch && listSearch->value()[0]) {
+                    const std::string query = listSearch->value();
+                    list.rows.erase(std::remove_if(list.rows.begin(), list.rows.end(), [&](const ListRow& row) {
+                        return std::search(row.searchText.begin(), row.searchText.end(), query.begin(), query.end(),
+                            [](unsigned char a, unsigned char b) {
+                                auto lower = [](unsigned char c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; };
+                                return lower(a) == lower(b);
+                            }) == row.searchText.end();
+                    }), list.rows.end());
+                    list.emptyMessage = "No passwords match your search.";
+                }
+                const int listX = listOrigin->x();
+                const int contentW = listOrigin->w();
+                int at = listOrigin->y() + 28;
+                listWidgets->push_back(new Text(listX, at, contentW, 20, upper(list.heading), 12, dimColor(), 4));
                 at += 36;
                 if (list.rows.empty()) {
-                    listWidgets->push_back(new Text(kMargin, at, contentW, 40, list.emptyMessage, 16, mutedColor()));
+                    listWidgets->push_back(new Text(listX, at, contentW, 40, list.emptyMessage, 16, mutedColor()));
                     at += 52;
                 }
                 for (std::size_t k = 0; k < list.rows.size(); ++k) {
@@ -2044,8 +2154,16 @@ void Menu::run() const {
                             std::unique_ptr<Fl_Image> favoriteIcon;
                             std::function<void()> open;
                             int handle(int event) override {
+                                // match the hover treatment of other clickable list rows
+                                if (event == FL_ENTER || event == FL_LEAVE) {
+                                    highlighted = event == FL_ENTER;
+                                    if (window()) window()->cursor(highlighted ? FL_CURSOR_HAND : FL_CURSOR_DEFAULT);
+                                    redraw();
+                                    return 1;
+                                }
                                 if (event == FL_PUSH) return 1;
                                 if (event == FL_RELEASE && Fl::event_inside(this)) {
+                                    if (window()) window()->cursor(FL_CURSOR_DEFAULT);
                                     auto action = open;
                                     action();
                                     return 1;
@@ -2053,12 +2171,16 @@ void Menu::run() const {
                                 return InfoRow::handle(event);
                             }
                         };
-                        auto* row = new EntryRow(kMargin, at, contentW, 60,
+                        auto* row = new EntryRow(listX, at, contentW, 60,
                             list.rows[k].title,
                             list.rows[k].detail, k == 0);
-                        // own the png with the row so list refreshes release it safely
-                        if (list.rows[k].starred) {
-                            row->favoriteIcon = loadCardLogo("Assets/star_full.png", 18, 18);
+                        // use card logos when provided; otherwise retain the password favorite star
+                        if (!list.rows[k].iconPath.empty() || list.rows[k].starred) {
+                            const bool hasLogo = !list.rows[k].iconPath.empty();
+                            row->favoriteIcon = loadCardLogo(hasLogo ? list.rows[k].iconPath
+                                                                    : "Assets/star_full.png",
+                                                              hasLogo ? 50 : 18, hasLogo ? 28 : 18);
+                            row->centerImage = hasLogo;
                             row->image(row->favoriteIcon.get());
                         }
                         row->open = [action = list.rows[k].open, refreshAction = weakRefresh.lock(), &window] {
@@ -2067,17 +2189,33 @@ void Menu::run() const {
                         };
                         listWidgets->push_back(row);
                     } else {
-                        listWidgets->push_back(new InfoRow(kMargin, at, contentW, 60, list.rows[k].title,
+                        listWidgets->push_back(new InfoRow(listX, at, contentW, 60, list.rows[k].title,
                                                            list.rows[k].detail, k == 0));
                     }
                     at += 60;
                 }
-                listWidgets->push_back(new Fl_Box(kMargin, at, 1, 24));
+                listWidgets->push_back(new Fl_Box(listX, at, 1, 24));
                 page->end();
+                page->init_sizes();
+                const int maxScroll = std::max(0, at + 24 - (page->y() + page->h()));
+                page->scroll_to(scrollX, std::min(scrollY, maxScroll));
                 page->redraw();
+                // repaint overlays after the scrolling page redraws beneath them
+                if (listSearch) listSearch->damage(FL_DAMAGE_ALL);
+                window.redraw();
             };
             *refreshAction = refresh;
             refresh = [refreshAction] { (*refreshAction)(); };
+            if (listSearch) {
+                // keep controls visible only while their section is selected
+                const auto originalRefresh = refresh;
+                refresh = [=] {
+                    listSearchIcon->hide();
+                    listSearch->show();
+                    listClear->show();
+                    originalRefresh();
+                };
+            }
         }
         for (std::size_t j = 0; j < sub->itemCount(); ++j) {
             Row* row = new Row(kMargin, y, contentW, 60, sub->itemLabel(j), j == 0);
@@ -2095,11 +2233,24 @@ void Menu::run() const {
         pageRefresh.push_back(refresh);
     }
 
+    window.positionSectionSearches.push_back([&] {
+        if (homePage->visible()) refreshHome();
+    });
+    for (auto& position : window.positionSectionSearches) position();
     navButtons.resize(pages.size(), nullptr);
-    auto showPage = [&pages, &navButtons, &window, &refreshHome, &pageRefresh](int index) {
+    auto showPage = [&pages, &navButtons, &window, &refreshHome, &pageRefresh, &sectionSearches](int index) {
         // refresh when returning home so changes from wallet menus show up here
         if (index == 0) refreshHome();
         else if (static_cast<std::size_t>(index) < pageRefresh.size() && pageRefresh[index]) pageRefresh[index]();
+        for (auto& controls : sectionSearches) {
+            if (controls.first == pages[index]) {
+                controls.second[0]->hide();
+                controls.second[1]->show();
+                controls.second[2]->show();
+            } else {
+                for (auto* control : controls.second) control->hide();
+            }
+        }
         for (std::size_t p = 0; p < pages.size(); ++p) {
             if (static_cast<int>(p) == index) pages[p]->show(); else pages[p]->hide();
             if (navButtons[p]) navButtons[p]->setSelected(static_cast<int>(p) == index);
