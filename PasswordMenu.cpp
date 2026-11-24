@@ -195,7 +195,7 @@ void configurePasswordHome(Menu& menu, passwords::PasswordManager& manager) {
 Menu passwordMenu(passwords::PasswordManager& manager) {
     Menu menu("Passwords");
     auto* p = &manager;
-    menu.add("Add Password", [p] {
+    menu.addPlus("Add Password", [p] {
         if (ready(*p)) addPasswordEntryForm(entrySubmit(*p));
     });
     // retain the standalone tools alongside the clickable saved entries
@@ -207,15 +207,18 @@ Menu passwordMenu(passwords::PasswordManager& manager) {
     menu.add("Generate a password", generatePassword);
     menu.add("Check password strength (coming soon)",
              [] { notImplemented("Checking password strength"); });
+    menu.enableListSearch();
     menu.setList([p] {
         Menu::List list;
         list.heading = "Saved Passwords";
         list.emptyMessage = p->loaded() ? "No passwords yet. Choose Add Password to get started."
                                        : "Saved passwords are unavailable.";
+        list.searchEmptyMessage = "No passwords match your search.";
         if (!p->loaded()) return list;
         for (const auto& entry : p->list())
             list.rows.push_back({entry.site, entry.username,
-                                 [p, entry] { viewEntry(*p, entry); }, entry.starred});
+                                 [p, entry] { viewEntry(*p, entry); }, entry.starred,
+                                 entry.site + " " + entry.username + " " + entry.notes});
         return list;
     });
     return menu;

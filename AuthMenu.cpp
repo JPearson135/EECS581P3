@@ -139,13 +139,15 @@ void removeAccountScreen(Authenticator& auth) {
 Menu authMenu(Authenticator& auth) {
     Menu menu("Authenticator");
     Authenticator* a = &auth;
-    menu.add("Add account", [a] { addAccountScreen(*a); });
+    menu.addPlus("Add account", [a] { addAccountScreen(*a); });
     menu.add("Show codes", [a] { showCodeScreen(*a); });
     menu.add("Delete account", [a] { removeAccountScreen(*a); });
     // Show account labels and contacts, but never the secret.
+    menu.enableListSearch();
     menu.setList([a] {
         Menu::List list;
         list.heading = "Saved accounts";
+        list.searchEmptyMessage = "No accounts match your search.";
         if (!a->loaded()) {
             list.emptyMessage = "Saved accounts are unavailable.";
             return list;
@@ -154,7 +156,8 @@ Menu authMenu(Authenticator& auth) {
         for (const AuthSummary& account : a->list()) {
             std::string detail = account.email;
             if (!account.phone.empty()) detail += (detail.empty() ? "" : "   ·   ") + account.phone;
-            list.rows.push_back({account.name, detail});
+            list.rows.push_back({account.name, detail, {}, false,
+                                 account.name + " " + account.email + " " + account.phone});
         }
         return list;
     });

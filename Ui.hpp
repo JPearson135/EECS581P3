@@ -56,6 +56,7 @@ public:
     explicit Menu(std::string title, std::string exitLabel = "Back");
 
     void add(const std::string& label, Action action, bool starred = false);
+    void addPlus(const std::string& label, Action action);
     void addSubmenu(const std::string& label, Menu submenu);
     // one home row contains display text, an optional logo, and a card details action
     struct HomeCard {
@@ -85,6 +86,7 @@ public:
     struct List {
         std::string heading;       // for example "Saved accounts"
         std::string emptyMessage;  // shown instead of rows when the list is empty
+        std::string searchEmptyMessage;
         std::vector<ListRow> rows;
     };
     // supply a fresh list every time the section is shown or one of its actions finishes
@@ -101,6 +103,7 @@ public:
     std::size_t itemCount() const { return items_.size(); }
     const std::string& itemLabel(std::size_t i) const { return items_[i].label; }
     bool itemStarred(std::size_t i) const { return items_[i].starred; }
+    bool itemIsPlus(std::size_t i) const { return items_[i].plus; }
     const Menu* itemSubmenu(std::size_t i) const { return items_[i].submenu.get(); }
     void invoke(std::size_t i) const;
 
@@ -110,6 +113,7 @@ private:
         Action action;
         std::shared_ptr<Menu> submenu;
         bool starred = false;
+        bool plus = false;
     };
     std::string title_;
     std::string exitLabel_;

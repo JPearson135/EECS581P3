@@ -158,20 +158,23 @@ void configureWalletHome(Menu& menu, wallet::CardWallet& cards) {
 Menu walletMenu(wallet::CardWallet& cards) {
     Menu menu("Wallet");
     wallet::CardWallet* w = &cards;
-    menu.add("Add card", [w] { addCard(*w); });
+    menu.addPlus("Add card", [w] { addCard(*w); });
     menu.add("Remove card", [w] { removeCard(*w); });
+    menu.enableListSearch();
     menu.setList([w] {
         Menu::List list;
         list.heading = "Saved Cards";
         list.emptyMessage = w->loaded() ? "No cards yet. Choose Add card to get started."
                                         : "Saved cards are unavailable.";
+        list.searchEmptyMessage = "No cards match your search.";
         if (!w->loaded()) return list;
         for (const auto& card : w->list()) {
             const std::string detail = card.holder.empty()
                 ? card.masked : card.holder + "    " + card.masked;
             list.rows.push_back({card.label, detail,
                                  [w, label = card.label] { openCard(*w, label); }, card.starred,
-                                 {}, cardNetworkIcon(card.network)});
+                                 card.label + " " + card.holder + " " + card.masked + " " + card.expiry,
+                                 cardNetworkIcon(card.network)});
         }
         return list;
     });

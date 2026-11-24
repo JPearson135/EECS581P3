@@ -1695,11 +1695,15 @@ Menu::Menu(std::string title, std::string exitLabel)
     : title_(std::move(title)), exitLabel_(std::move(exitLabel)) {}
 
 void Menu::add(const std::string& label, Action action, bool starred) {
-    items_.push_back({label, std::move(action), nullptr, starred});
+    items_.push_back({label, std::move(action), nullptr, starred, false});
+}
+
+void Menu::addPlus(const std::string& label, Action action) {
+    items_.push_back({label, std::move(action), nullptr, false, true});
 }
 
 void Menu::addSubmenu(const std::string& label, Menu submenu) {
-    items_.push_back({label, nullptr, std::make_shared<Menu>(std::move(submenu))});
+    items_.push_back({label, nullptr, std::make_shared<Menu>(std::move(submenu)), false, false});
 }
 
 // register home providers without loading cards until the window is shown
@@ -1813,6 +1817,17 @@ void Menu::run() const {
             return EyeButton::handle(event);
         }
     };
+    class ClearButton : public EyeButton {
+    public:
+        using EyeButton::EyeButton;
+        Fl_Image* grey = nullptr;
+        Fl_Image* gold = nullptr;
+        int handle(int event) override {
+            if (event == FL_ENTER) { image(gold); if (window()) window()->redraw(); }
+            if (event == FL_LEAVE) { image(grey); if (window()) window()->redraw(); }
+            return EyeButton::handle(event);
+        }
+    };
     // search shares the scroll area with the heading, add control, and favorites
     home->begin();
     auto* searchButton = new SearchButton(kWinW - kMargin - 139, 174, 44, 44);
@@ -1823,12 +1838,15 @@ void Menu::run() const {
     auto* searchInput = new Field<Fl_Input>(kWinW - kMargin - 310, 181, 310, 34);
     Fl_PNG_Image clearSource("search-clear", crossIcon, sizeof(crossIcon));
     auto clearImage = makeIcon(clearSource, 64);
-    auto* clearSearch = new EyeButton(searchInput->x() + searchInput->w() - 44,
-                                      searchInput->y() - 5, 44, 44);
+    auto clearGrey = loadCardLogo("Assets/cross_grey.png", 16, 16);
+    auto* clearSearch = new ClearButton(searchInput->x() + searchInput->w() - 44,
+                                        searchInput->y() - 5, 44, 44);
     clearSearch->color(bgColor());
     clearSearch->insideField = true;
     clearSearch->inputOwner = searchInput;
-    clearSearch->image(clearImage.get());
+    clearSearch->grey = clearGrey.get();
+    clearSearch->gold = clearImage.get();
+    clearSearch->image(clearGrey.get());
     clearSearch->tooltip("Clear search");
     searchInput->embeddedEye = clearSearch;
     searchButton->hide();
@@ -1982,6 +2000,11 @@ void Menu::run() const {
         home->end();
         home->init_sizes();
         home->scroll_to(scrollX, scrollY);
+        // keep the search input and its clear button above the scroll anchor and result rows
+        home->remove(searchInput);
+        home->add(searchInput);
+        home->remove(clearSearch);
+        home->add(clearSearch);
         homePage->redraw();
     };
     searchInput->validateOnEdit = [&] { refreshHome(); };
@@ -2050,7 +2073,14 @@ void Menu::run() const {
         new Text(kMargin, 110, contentW, 20, "SECTION", 12, dimColor(), 4);
         new Text(kMargin, 146, contentW, 56, sub->title(), 40, textColor());
         int y = 236;
-        const int listTop = y + 60 * static_cast<int>(sub->itemCount());
+        const int plusY = y - 46;
+        const bool hasPlus = sub->itemCount() > 0 && sub->itemIsPlus(0);
+        // leave the same breathing room below the plus as the Favorites page
+        if (hasPlus) y += 18;
+        int rowCount = 0;
+        for (std::size_t j = 0; j < sub->itemCount(); ++j)
+            if (!sub->itemIsPlus(j)) ++rowCount;
+        const int listTop = y + 60 * rowCount;
         // keep an anchor that follows window resizing along with the section controls
         auto* listOrigin = new Fl_Box(kMargin, listTop, contentW, 1);
         // a section can show a read-only list under its rows (for example the saved accounts);
@@ -2062,20 +2092,23 @@ void Menu::run() const {
             std::weak_ptr<std::function<void()>> weakRefresh = refreshAction;
             Field<Fl_Input>* listSearch = nullptr;
             SearchButton* listSearchIcon = nullptr;
-            EyeButton* listClear = nullptr;
+            ClearButton* listClear = nullptr;
             if (sub->searchableList_) {
-                // keep search with the section content so it scrolls in context
-                listSearchIcon = new SearchButton(kWinW - kMargin - 34, 100, 44, 44);
+                // align the search field with the add icon on the same row
+                const int searchRight = kWinW - kMargin;
+                listSearchIcon = new SearchButton(searchRight - 34, 192, 44, 44);
                 listSearchIcon->color(bgColor());
                 listSearchIcon->grey = searchGrey.get();
                 listSearchIcon->gold = searchGold.get();
                 listSearchIcon->image(searchGrey.get());
-                listSearch = new Field<Fl_Input>(kWinW - kMargin - 310, 105, 310, 34);
-                listClear = new EyeButton(kWinW - kMargin - 44, 100, 44, 44);
+                listSearch = new Field<Fl_Input>(searchRight - 310, 197, 310, 34);
+                listClear = new ClearButton(searchRight - 44, 192, 44, 44);
                 listClear->color(bgColor());
                 listClear->insideField = true;
                 listClear->inputOwner = listSearch;
-                listClear->image(clearImage.get());
+                listClear->grey = clearGrey.get();
+                listClear->gold = clearImage.get();
+                listClear->image(clearGrey.get());
                 listSearch->embeddedEye = listClear;
                 listSearch->when(FL_WHEN_NEVER);
                 listSearch->hide();
@@ -2102,19 +2135,6 @@ void Menu::run() const {
                     listSearch->take_focus();
                 }));
                 sectionSearches.push_back({page, {listSearchIcon, listSearch, listClear}});
-                window.positionSectionSearches.push_back([=] {
-                    for (int child = 0; child < page->children(); ++child) {
-                        auto* row = dynamic_cast<Row*>(page->child(child));
-                        if (!row) continue;
-                        const int right = row->x() + row->w();
-                        // align search with favorites and leave a small gap above the first divider
-                        const int top = row->y() - 60;
-                        listSearchIcon->position(right - 34, top);
-                        listSearch->position(right - listSearch->w(), top + 5);
-                        listClear->position(right - 44, top);
-                        break;
-                    }
-                });
             }
             refresh = [page, sub, listWidgets, weakRefresh, listOrigin, listSearch, &window] {
                 if (!window.shown()) return;  // an action may have locked or closed the window
@@ -2135,7 +2155,8 @@ void Menu::run() const {
                                 return lower(a) == lower(b);
                             }) == row.searchText.end();
                     }), list.rows.end());
-                    list.emptyMessage = "No passwords match your search.";
+                    list.emptyMessage = list.searchEmptyMessage.empty()
+                        ? "No results match your search." : list.searchEmptyMessage;
                 }
                 const int listX = listOrigin->x();
                 const int contentW = listOrigin->w();
@@ -2217,13 +2238,41 @@ void Menu::run() const {
                 };
             }
         }
+        bool firstRow = true;
+        SearchButton* plusButton = nullptr;
         for (std::size_t j = 0; j < sub->itemCount(); ++j) {
-            Row* row = new Row(kMargin, y, contentW, 60, sub->itemLabel(j), j == 0);
+            if (sub->itemIsPlus(j)) {
+                plusButton = new SearchButton(kMargin - 10, plusY, 44, 44);
+                plusButton->color(bgColor());
+                plusButton->grey = addGrey.get();
+                plusButton->gold = addGold.get();
+                plusButton->image(addGrey.get());
+                plusButton->tooltip(sub->itemLabel(j).c_str());
+                plusButton->callback(trampoline, bindings.add([sub, j, refresh] {
+                    sub->invoke(j);
+                    if (refresh) refresh();
+                }));
+                continue;
+            }
+            Row* row = new Row(kMargin, y, contentW, 60, sub->itemLabel(j), firstRow);
+            firstRow = false;
             row->callback(trampoline, bindings.add([sub, j, refresh] {
                 sub->invoke(j);
                 if (refresh) refresh();
             }));
             y += 60;
+        }
+        if (plusButton && sub->searchableList_) {
+            auto* listSearch = dynamic_cast<Field<Fl_Input>*>(sectionSearches.back().second[1]);
+            auto* listSearchIcon = dynamic_cast<SearchButton*>(sectionSearches.back().second[0]);
+            auto* listClear = dynamic_cast<EyeButton*>(sectionSearches.back().second[2]);
+            window.positionSectionSearches.push_back([=] {
+                const int right = page->x() + page->w() - kMargin;
+                const int fieldY = plusButton->y() + 7;
+                listSearchIcon->position(right - 34, fieldY - 5);
+                listSearch->position(right - listSearch->w(), fieldY);
+                listClear->position(right - 44, fieldY - 5);
+            });
         }
         new Fl_Box(kMargin, y, 1, 24);
         page->end();
