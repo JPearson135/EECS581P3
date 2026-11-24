@@ -117,16 +117,6 @@ void viewCards(wallet::CardWallet& cards) {
     if (const auto label = pickCard(cards, "View cards")) openCard(cards, *label);
 }
 
-void removeCard(wallet::CardWallet& cards) {
-    if (!ready(cards)) return;
-    guarded([&] {
-        const auto label = pickCard(cards, "Remove card");
-        if (!label) return;
-        if (!confirm("Remove \"" + *label + "\"? This cannot be undone.")) return;
-        if (cards.remove(*label)) showMessage("Card removed.");
-    });
-}
-
 }  // namespace
 
 // build home rows from masked summaries and reuse the wallet actions
@@ -159,7 +149,6 @@ Menu walletMenu(wallet::CardWallet& cards) {
     Menu menu("Wallet");
     wallet::CardWallet* w = &cards;
     menu.addPlus("Add card", [w] { addCard(*w); });
-    menu.add("Remove card", [w] { removeCard(*w); });
     menu.enableListSearch();
     menu.setList([w] {
         Menu::List list;
@@ -174,7 +163,11 @@ Menu walletMenu(wallet::CardWallet& cards) {
             list.rows.push_back({card.label, detail,
                                  [w, label = card.label] { openCard(*w, label); }, card.starred,
                                  card.label + " " + card.holder + " " + card.masked + " " + card.expiry,
-                                 cardNetworkIcon(card.network)});
+                                 cardNetworkIcon(card.network), [w, label = card.label] {
+                                     if (!ready(*w) || !confirm("Delete \"" + label + "\"? This cannot be undone."))
+                                         return;
+                                     guarded([&] { w->remove(label); });
+                                 }});
         }
         return list;
     });

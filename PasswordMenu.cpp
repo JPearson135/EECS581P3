@@ -117,8 +117,7 @@ void editEntry(passwords::PasswordManager& manager, const passwords::EntrySummar
         const auto password = manager.revealPassword(entry.site, entry.username);
         if (!password) return;
         addPasswordEntryForm(entrySubmit(manager, entry), entry.site, entry.username,
-                             password->view(), entry.notes,
-                             [&] { return manager.remove(entry.site, entry.username); });
+                             password->view(), entry.notes, true);
     });
 }
 
@@ -218,7 +217,12 @@ Menu passwordMenu(passwords::PasswordManager& manager) {
         for (const auto& entry : p->list())
             list.rows.push_back({entry.site, entry.username,
                                  [p, entry] { viewEntry(*p, entry); }, entry.starred,
-                                 entry.site + " " + entry.username + " " + entry.notes});
+                                 entry.site + " " + entry.username + " " + entry.notes, "",
+                                 [p, entry] {
+                                     if (!ready(*p) || !confirm("Delete \"" + entry.site + "\"? This cannot be undone."))
+                                         return;
+                                     guarded([&] { p->remove(entry.site, entry.username); });
+                                 }});
         return list;
     });
     return menu;

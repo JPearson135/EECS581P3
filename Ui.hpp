@@ -27,7 +27,7 @@ using PasswordSubmit = std::function<PasswordFormError(const std::string&, const
 void addPasswordEntryForm(const PasswordSubmit& onSubmit,
                           const std::string& site = "", const std::string& username = "",
                           std::string_view password = {}, const std::string& notes = "",
-                          const std::function<bool()>& remove = {});
+                          bool editing = false);
 bool createPasswordScreen(const std::string& rules, const std::function<std::string(const std::string&, const std::string&)>& submit);
 bool unlockScreen(const std::function<bool(const std::string&)>& unlock);
 void init();
@@ -82,6 +82,7 @@ public:
         bool starred = false;
         std::string searchText;
         std::string iconPath;
+        Action erase;
     };
     struct List {
         std::string heading;       // for example "Saved accounts"

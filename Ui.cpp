@@ -371,6 +371,7 @@ public:
         : Fl_Widget(x, y, w, h), title_(title), detail_(detail), first_(first) {}
     bool highlighted = false;
     bool centerImage = false;
+    int rightInset = 0;
     void draw() override {
         fl_color(highlighted ? surfaceColor() : bgColor());
         fl_rectf(x(), y(), w(), h());
@@ -387,12 +388,12 @@ public:
             marker->draw(x(), imageY);
             titleIndent = marker->w() + 8;
         }
-        fl_draw(title_.c_str(), x() + titleIndent, y() + 8, w() - titleIndent, 24,
+        fl_draw(title_.c_str(), x() + titleIndent, y() + 8, w() - titleIndent - rightInset, 24,
                 FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
         fl_font(FL_HELVETICA, scaledText(*this, 13));
         fl_color(mutedColor());
         const int detailIndent = centerImage ? titleIndent : 0;
-        fl_draw(detail_.c_str(), x() + detailIndent, y() + 34, w() - detailIndent, 18,
+        fl_draw(detail_.c_str(), x() + detailIndent, y() + 34, w() - detailIndent - rightInset, 18,
                 FL_ALIGN_LEFT | FL_ALIGN_INSIDE, nullptr, 0);
     }
 private:
@@ -1320,17 +1321,17 @@ void addAuthenticatorAccountForm(const AuthSubmit& submit) {
 
 void addPasswordEntryForm(const PasswordSubmit& onSubmit, const std::string& initialSite,
                           const std::string& initialUsername, std::string_view initialPassword,
-                          const std::string& initialNotes, const std::function<bool()>& remove) {
+                          const std::string& initialNotes, bool editing) {
     Fl_PNG_Image hiddenSource("hidden", hiddenIcon, sizeof(hiddenIcon));
     Fl_PNG_Image visibleSource("visible", visibleIcon, sizeof(visibleIcon));
     std::unique_ptr<Fl_Image> hidden = makeIcon(hiddenSource, 96);
     std::unique_ptr<Fl_Image> visible = makeIcon(visibleSource, 104);
     BindingList bindings;
     DialogWindow dialog(540, 650);
-    dialog.copy_label(remove ? "Edit password" : "Add password");
+    dialog.copy_label(editing ? "Edit password" : "Add password");
     dialog.color(bgColor());
     dialog.set_modal();
-    new Text(40, 28, 460, 36, remove ? "Edit password" : "Add password", 26, textColor());
+    new Text(40, 28, 460, 36, editing ? "Edit password" : "Add password", 26, textColor());
     new Text(40, 70, 460, 38, "Entries are encrypted in your vault.",
              14, mutedColor());
 
@@ -1419,14 +1420,8 @@ void addPasswordEntryForm(const PasswordSubmit& onSubmit, const std::string& ini
     };
     auto* cancel = new LinkButton(240, 560, 80, 30, "Cancel", false);
     cancel->callback(trampoline, bindings.add(close));
-    auto* addButton = new LinkButton(350, 560, 150, 30, remove ? "Save changes" : "Add password", true);
+    auto* addButton = new LinkButton(350, 560, 150, 30, editing ? "Save changes" : "Add password", true);
     addButton->callback(trampoline, bindings.add(submitForm));
-    if (remove) {
-        auto* erase = new LinkButton(40, 560, 90, 30, "Delete", false);
-        erase->callback(trampoline, bindings.add([&] {
-            if (confirm("Delete this password entry? This cannot be undone.") && remove()) close();
-        }));
-    }
     dialog.onEnter = submitForm;
     dialog.end();
     centre(dialog);
@@ -2173,28 +2168,58 @@ void Menu::run() const {
                         public:
                             using InfoRow::InfoRow;
                             std::unique_ptr<Fl_Image> favoriteIcon;
+                            std::unique_ptr<Fl_Image> binDark;
+                            std::unique_ptr<Fl_Image> binLight;
                             std::function<void()> open;
+                            std::function<void()> erase;
+                            bool hovering = false;
+                            bool binHovering = false;
+                            bool deletePressed = false;
+                            bool insideBin() const {
+                                const int left = x() + w() - 44;
+                                const int top = y() + (h() - 44) / 2;
+                                return Fl::event_x() >= left && Fl::event_x() < left + 44 &&
+                                       Fl::event_y() >= top && Fl::event_y() < top + 44;
+                            }
+                            void draw() override {
+                                InfoRow::draw();
+                                if (!hovering || !binDark) return;
+                                Fl_Image* bin = binHovering ? binLight.get() : binDark.get();
+                                if (bin) bin->draw(x() + w() - 32, y() + (h() - bin->h()) / 2);
+                            }
                             int handle(int event) override {
-                                // match the hover treatment of other clickable list rows
-                                if (event == FL_ENTER || event == FL_LEAVE) {
-                                    highlighted = event == FL_ENTER;
-                                    if (window()) window()->cursor(highlighted ? FL_CURSOR_HAND : FL_CURSOR_DEFAULT);
+                                if (event == FL_ENTER || event == FL_MOVE || event == FL_DRAG || event == FL_LEAVE) {
+                                    hovering = event != FL_LEAVE && Fl::event_inside(this);
+                                    binHovering = hovering && erase && insideBin();
+                                    highlighted = hovering;
+                                    if (window()) window()->cursor(hovering ? FL_CURSOR_HAND : FL_CURSOR_DEFAULT);
                                     redraw();
                                     return 1;
                                 }
-                                if (event == FL_PUSH) return 1;
-                                if (event == FL_RELEASE && Fl::event_inside(this)) {
-                                    if (window()) window()->cursor(FL_CURSOR_DEFAULT);
-                                    auto action = open;
-                                    action();
+                                if (event == FL_PUSH) {
+                                    deletePressed = static_cast<bool>(erase) && insideBin();
                                     return 1;
                                 }
+                                if (event == FL_RELEASE && Fl::event_inside(this)) {
+                                    if (window()) window()->cursor(FL_CURSOR_DEFAULT);
+                                    const bool deleteRow = deletePressed && static_cast<bool>(erase) && insideBin();
+                                    deletePressed = false;
+                                    auto action = deleteRow ? erase : open;
+                                    if (action) action();
+                                    return 1;
+                                }
+                                deletePressed = false;
                                 return InfoRow::handle(event);
                             }
                         };
                         auto* row = new EntryRow(listX, at, contentW, 60,
                             list.rows[k].title,
                             list.rows[k].detail, k == 0);
+                        if (list.rows[k].erase) {
+                            row->rightInset = 50;
+                            row->binDark = loadCardLogo("Assets/bin_dark.png", 20, 20);
+                            row->binLight = loadCardLogo("Assets/bin.png", 20, 20);
+                        }
                         // use card logos when provided; otherwise retain the password favorite star
                         if (!list.rows[k].iconPath.empty() || list.rows[k].starred) {
                             const bool hasLogo = !list.rows[k].iconPath.empty();
@@ -2208,6 +2233,11 @@ void Menu::run() const {
                             action();
                             if (window.shown()) (*refreshAction)();
                         };
+                        if (list.rows[k].erase)
+                            row->erase = [action = list.rows[k].erase, refreshAction = weakRefresh.lock(), &window] {
+                                action();
+                                if (window.shown()) (*refreshAction)();
+                            };
                         listWidgets->push_back(row);
                     } else {
                         listWidgets->push_back(new InfoRow(listX, at, contentW, 60, list.rows[k].title,
