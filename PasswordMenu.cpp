@@ -138,15 +138,6 @@ void viewEntry(passwords::PasswordManager& manager, const passwords::EntrySummar
             }, "Show password");
     });
 }
-void searchEntries(passwords::PasswordManager& manager) {
-    if (!ready(manager)) return;
-    std::string query;
-    if (!askText("Search sites, usernames, and notes:", query)) return;
-    if (const auto entry = pickEntry(manager, "Search results", query)) {
-        guarded([&] { viewEntry(manager, *entry); });
-    }
-}
-
 void generatePassword() {
     std::string lengthText;
     if (!askText("Password length (4–128):", lengthText, "16")) return;
@@ -197,12 +188,7 @@ Menu passwordMenu(passwords::PasswordManager& manager) {
     menu.addPlus("Add Password", [p] {
         if (ready(*p)) addPasswordEntryForm(entrySubmit(*p));
     });
-    // retain the standalone tools alongside the clickable saved entries
-    menu.add("View entries", [p] {
-        if (!ready(*p)) return;
-        if (const auto entry = pickEntry(*p, "View entries")) viewEntry(*p, *entry);
-    });
-    menu.add("Search entries", [p] { searchEntries(*p); });
+    // saved rows open entries directly and the section search filters them in place
     menu.add("Generate a password", generatePassword);
     menu.add("Check password strength (coming soon)",
              [] { notImplemented("Checking password strength"); });

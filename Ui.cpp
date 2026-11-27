@@ -268,6 +268,32 @@ private:
     bool hovering_ = false;
 };
 
+// Image-only actions use muted artwork at rest and gold artwork while hovered.
+class IconHoverButton : public HoverButton {
+public:
+    IconHoverButton(int x, int y, int w, int h, Fl_Image* grey, Fl_Image* gold)
+        : HoverButton(x, y, w, h), grey_(grey), gold_(gold) {
+        image(grey_);
+    }
+    int handle(int event) override {
+        const int used = HoverButton::handle(event);
+        if (event == FL_ENTER) image(gold_);
+        else if (event == FL_LEAVE) image(grey_);
+        if (event == FL_ENTER || event == FL_LEAVE) redraw();
+        return used;
+    }
+    void draw() override {
+        if (image()) image()->draw(x() + (rightAligned_ ? w() - image()->w()
+                                                        : (w() - image()->w()) / 2),
+                                   y() + (h() - image()->h()) / 2);
+    }
+    void alignIconRight() { rightAligned_ = true; redraw(); }
+private:
+    Fl_Image* grey_;
+    Fl_Image* gold_;
+    bool rightAligned_ = false;
+};
+
 // the wordmark doubles as the link back to the welcome page
 class HomeWordmark : public HoverButton {
 public:
@@ -348,20 +374,32 @@ public:
         fl_rectf(x(), y() + h() - 1, w(), 1);
         if (first_) fl_rectf(x(), y(), w(), 1);
         int indent = hovering() ? 14 : 0;
+        if (greyIcon_) {
+            Fl_Image* icon = hovering() ? goldIcon_ : greyIcon_;
+            if (icon) icon->draw(x() + indent, y() + (h() - icon->h()) / 2);
+        }
         if (auto* marker = image()) {
             marker->draw(x() + indent, y() + (h() - marker->h()) / 2);
             indent += marker->w() + 8;
         }
-        fl_font(FL_HELVETICA, scaledText(*this, 17));
-        fl_color(textColor());
-        fl_draw(label(), x() + indent, y(), w() - 60 - indent, h(), FL_ALIGN_LEFT | FL_ALIGN_INSIDE,
-                nullptr, 0);
+        if (!greyIcon_) {
+            fl_font(FL_HELVETICA, scaledText(*this, 17));
+            fl_color(textColor());
+            fl_draw(label(), x() + indent, y(), w() - 60 - indent, h(), FL_ALIGN_LEFT | FL_ALIGN_INSIDE,
+                    nullptr, 0);
+        }
         fl_font(FL_HELVETICA, scaledText(*this, 16));
         fl_color(hovering() ? accentColor() : dimColor());
         fl_draw("→", x(), y(), w() - 14, h(), FL_ALIGN_RIGHT | FL_ALIGN_INSIDE, nullptr, 0);
     }
+    void setActionIcons(Fl_Image* grey, Fl_Image* gold) {
+        greyIcon_ = grey;
+        goldIcon_ = gold;
+    }
 private:
     bool first_;
+    Fl_Image* greyIcon_ = nullptr;
+    Fl_Image* goldIcon_ = nullptr;
 };
 
 // read-only row: a title with a smaller detail line underneath, no arrow and no click action
@@ -804,6 +842,9 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
     std::unique_ptr<Fl_Image> visibleDisplay = makeIcon(visibleImage, 104);
     auto emptyStar = star ? loadCardLogo("Assets/star_empty.png", 22, 22) : nullptr;
     auto filledStar = star ? loadCardLogo("Assets/star_full.png", 22, 22) : nullptr;
+    const bool hasEdit = star || (editAction && revealAction);
+    auto editGrey = hasEdit ? loadCardLogo("Assets/edit_grey.png", 22, 22) : nullptr;
+    auto editGold = hasEdit ? loadCardLogo("Assets/edit_gold.png", 22, 22) : nullptr;
     const int width = 480, pad = 40, inner = width - 2 * pad;
     const bool hasIcon = !iconPath.empty();
     const int messageWidth = hasIcon ? inner - 112 : inner;
@@ -904,9 +945,10 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
         auto* toggle = new StarButton(pad, y, 40, 30);
         toggle->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
         // edit and reveal are explicit actions while ok closes the details dialog
-        auto* edit = new LinkButton(pad + 48, y, 52, 30, "Edit", false);
+        auto* edit = new IconHoverButton(pad + 32, y, 30, 30, editGrey.get(), editGold.get());
+        edit->tooltip("Edit");
         edit->callback(trampoline, bindings.add([star, win] { win->hide(); star->edit(); }));
-        auto* reveal = new LinkButton(pad + 115, y, 112, 30, star->revealLabel, false);
+        auto* reveal = new LinkButton(pad + 80, y, 112, 30, star->revealLabel, false);
         reveal->callback(trampoline, bindings.add(star->reveal));
         auto* error = new Fl_Box(pad, y + 30, 240, 24);
         error->labelsize(13);
@@ -929,7 +971,8 @@ bool prompt(Kind kind, const std::string& message, std::string* value,
             refreshStar();
         }));
     } else if (editAction && revealAction) {
-        auto* edit = new LinkButton(pad, y, 52, 30, "Edit", false);
+        auto* edit = new IconHoverButton(pad, y, 52, 30, editGrey.get(), editGold.get());
+        edit->tooltip("Edit");
         edit->callback(trampoline, bindings.add([win, editAction] {
             win->hide();
             (*editAction)();
@@ -1697,6 +1740,10 @@ void Menu::addPlus(const std::string& label, Action action) {
     items_.push_back({label, std::move(action), nullptr, false, true});
 }
 
+void Menu::addBottomIconAction(const std::string& label, Action action) {
+    items_.push_back({label, std::move(action), nullptr, false, false, true});
+}
+
 void Menu::addSubmenu(const std::string& label, Menu submenu) {
     items_.push_back({label, nullptr, std::make_shared<Menu>(std::move(submenu)), false, false});
 }
@@ -1801,6 +1848,8 @@ void Menu::run() const {
     auto searchGold = loadCardLogo("Assets/search_gold.png", 24, 24);
     auto addGrey = loadCardLogo("Assets/add_grey.png", 24, 24);
     auto addGold = loadCardLogo("Assets/add_gld.png", 24, 24);
+    auto lockGrey = loadCardLogo("Assets/lock_grey.png", 24, 24);
+    auto lockGold = loadCardLogo("Assets/lock_gold.png", 24, 24);
     class SearchButton : public EyeButton {
     public:
         using EyeButton::EyeButton;
@@ -2074,7 +2123,7 @@ void Menu::run() const {
         if (hasPlus) y += 18;
         int rowCount = 0;
         for (std::size_t j = 0; j < sub->itemCount(); ++j)
-            if (!sub->itemIsPlus(j)) ++rowCount;
+            if (!sub->itemIsPlus(j) && !sub->itemIsBottomIconAction(j)) ++rowCount;
         const int listTop = y + 60 * rowCount;
         // keep an anchor that follows window resizing along with the section controls
         auto* listOrigin = new Fl_Box(kMargin, listTop, contentW, 1);
@@ -2279,6 +2328,17 @@ void Menu::run() const {
                 plusButton->image(addGrey.get());
                 plusButton->tooltip(sub->itemLabel(j).c_str());
                 plusButton->callback(trampoline, bindings.add([sub, j, refresh] {
+                    sub->invoke(j);
+                    if (refresh) refresh();
+                }));
+                continue;
+            }
+            if (sub->itemIsBottomIconAction(j)) {
+                auto* lockButton = new IconHoverButton(kWinW - kMargin - 44, kWinH - 64,
+                                                       44, 44, lockGrey.get(), lockGold.get());
+                lockButton->alignIconRight();
+                lockButton->tooltip(sub->itemLabel(j).c_str());
+                lockButton->callback(trampoline, bindings.add([sub, j, refresh] {
                     sub->invoke(j);
                     if (refresh) refresh();
                 }));

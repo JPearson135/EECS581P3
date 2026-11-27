@@ -75,7 +75,7 @@ void requestLock(bool& lockRequested) {
 ui::Menu securityMenu(bool& lockRequested) {
     ui::Menu menu("Security");
     menu.add("Change master password", [] { ui::notImplemented("Change master password"); });
-    menu.add("Lock now", [&lockRequested] {
+    menu.addBottomIconAction("Lock now", [&lockRequested] {
         requestLock(lockRequested);
     });
     return menu;
